@@ -79,7 +79,7 @@ Tasks about stay keys and the door (3, part of 19) and the bike (5) are **droppe
 ### Device layer (from docs/HOST-APP.md — please confirm)
 | # | Task | Who | Due | Status |
 |---|---|---|---|---|
-| 34 | Device/service layer on top of hub-core: one JSON per device in `data/<hub>/devices/` with versions, validation, routes `/api/devices` (list, add, edit → proposed + diff, apply, rollback) and public `/api/services` + `/api/services/:id/order` via `requestPayment`; `paid` → device `running` | Alessandro (or who he agrees) | Sat 18:00 | proposed |
+| 34 | Device/service layer on top of hub-core: one JSON per device in `data/<hub>/devices/` with versions, validation, routes `/api/devices` (list, add, edit → proposed + diff, apply, rollback) and public `/api/services` + `/api/services/:id/order` via `requestPayment`; `paid` → device `running` | Vittorio + Lapo (Alessandro: transactions) | Sat 18:00 | todo — rules from the payment layer (API_usage.md): order price taken by the server from the device JSON, never from the request body; HUSD by `assetId`, never ticker; order id = payment id (guest app uses `/api/check` + `/api/pay-request`). Only `hub.requestPayment` / `hub.on('paid')` / `hub.prepareTransfer`, no wallet calls |
 | 35 | AI: `editDevice(text, currentJson)` → proposed device JSON, and `deviceToService(descriptor)` in the same format (HOST-APP.md §2) | Lapo | Sat evening | done (format of HOST-APP.md §2; contract and usage in CLAUDE.md "AI contract") |
 
 ### Stretch (only after the Sunday 10:00 milestone)
