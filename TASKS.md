@@ -51,7 +51,7 @@ Task numbers 17, 24, 25 and 26 are referenced by the plan: keep them.
 | 14 | `/api/ai/*` routes in `hub.js` (service, behaviour: owner; bundle: public), agreed with Alessandro | 6 | Sat evening | todo |
 | 15 | Plug-and-play: device descriptor → proposed service + behaviours | 3a | Sun 10:00 | todo |
 | 16 | House documents: contract → proposed behaviours; guest questions answered from the documents (RAG) | 3b | Sun 10:00 | todo |
-| 17 | Questions to mentors: QVAC on another LAN machine counts as on-device? WDK bonus with watch-only hubs? 0-conf unlock? | 0-bis | Sat 15:00 | todo |
+| 17 | Questions to mentors: QVAC on another LAN machine counts as on-device? WDK bonus with watch-only hubs? 0-conf unlock? | 0-bis | Sat 15:00 | doing |
 | 18 | Decide where QVAC runs in the demo (demo PC or Lapo's GPU PC) and measure answer time there | 0-bis | Sat 18:00 | todo |
 
 ### Vittorio — interfaces (pages call the HTTP API of plan section 6 and `CLAUDE.md`)
