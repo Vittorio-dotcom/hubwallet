@@ -32,8 +32,8 @@ Deadline: last commit on `main` by **Sunday 18 October, 13:00**. Demo-ready targ
 | 17 | Questions to mentors (0-conf unlock, WDK bonus) | Lapo | todo |
 | 18 | Stretch: Raspberry/ESP32 device driven by the hub | — | later |
 | 19 | Host onboarding: AI turns "create the hub of X with door, washer, bike" into a setup plan JSON; code creates the wallet (WDK), UTXOs and services after the host confirms | Lapo (AI) + Alessandro (code) | todo |
-| 20 | Guest onboarding: AI-guided creation of the guest wallet (code creates it), shows the address to fund and the first invoice to receive the key | Lapo + Alessandro | todo |
-| 21 | Guest assistant in the guest app: request in plain language → bundle across services → confirm → pay | Vittorio (UI) + Lapo | todo |
+| 20 | Guest onboarding (code only, no AI): create the guest wallet, show the address to fund and the first invoice to receive the key | Alessandro + Vittorio (UI) | todo |
+| 21 | "Ask the home" box in the guest app: calls the hub's public `/api/ai/bundle`, shows the bundle and total, confirm → pay | Vittorio (UI) + Lapo (hub AI) | todo |
 | 22 | Host AI panel in the host app: create services/behaviours by text, see the JSON, confirm | Vittorio (UI) + Lapo | todo |
 | 23 | Device functions shown on device and host pages (behaviours list, last triggered) | Vittorio + Alessandro | todo |
 

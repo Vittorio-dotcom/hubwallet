@@ -18,9 +18,14 @@ turns them into JSON. The AI never moves money: code executes, the owner approve
 - **Two hubs** (hub A "Casa Rossi", hub B), each with **its own WDK wallet**. The host connects devices to each hub.
 - **The guest has their own wallet** and uses the services of both hubs with the same wallet.
 - **Devices can have a function (behaviour)** attached: rules like "if stock < 3 propose a restock", "weekend price +20%", "rental overdue → keep deposit", "notify".
-- **AI on both sides**:
-  - host: conversational onboarding ("create the hub of Casa Rossi with a door, a washing machine and a bike"), services and behaviours from plain language;
-  - guest: conversational onboarding of the guest wallet, requests like "a wash and then the bike for 2 hours" → bundle proposal.
+- **AI only on the hub** (decided 17 Oct, later): the guest-side AI was decorative and is dropped. The hub's AI does
+  host onboarding ("create the hub of Casa Rossi with a door, a washing machine and a bike"), services and
+  behaviours from plain language, spending proposals, and a **public assistant API for guests**
+  (`POST /api/ai/bundle {text}` → `[{ serviceId, hours? }]`). The guest app stays simple and calls that API.
+- **One wallet per hub** (not per host): properties are not linked on-chain and a compromised hub does not expose the
+  others. Later: one host seed with one account per hub; a watch-only hub that can receive but not spend, with the host
+  signing spending from their phone.
+- The hub stores no guest identity: only services, orders, payments and device state.
 - ⚠️ **The AI never generates keys or seeds.** Wallets are created by code (WDK, `bip39.generateMnemonic`, crypto RNG). The AI only understands the request and proposes the setup; code executes it; the human confirms.
 
 ## Architecture
