@@ -89,7 +89,7 @@ Test without the hub: `node src/ai.js service|behaviour|bundle|device "<text or 
 Functions (all `async`, throw `Error` with a message to show the user):
 - `textToService(text)` → `{ name, icon, type: access|use|rent, price (cents, per hour for rent; 0 for access), unit: use|hour, maxHours? }`
 - `textToBehaviour(text, services)` → `{ serviceId, trigger: { kind, value }, action: { kind, ... }, text }`
-  - trigger: `stock_below` value = items left · `weekday` value = `['sat','sun']` (mon..sun) · `overdue` value = hours late · `after_hour` value = 0–23
+  - trigger: `stock_below` value = items left · `weekday` value = `['sat','sun']` (mon..sun) · `overdue` value = hours late · `after_hour` value = 0–23 · `use_count` value = every N uses (e.g. maintenance every 50 washes)
   - action (same names as `behaviours.js`): `propose_purchase { item, quantity?, maxAmount? (cents) }` · `change_price { percent }` (+20, -10) ·
     `notify { message }` · `lock {}` · `unlock {}` · `keep_deposit { amount? (cents; absent = whole deposit) }`
   - money guard: `maxAmount` / `amount` are kept only if that number is written in the host's text

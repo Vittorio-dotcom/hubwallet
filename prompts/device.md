@@ -13,7 +13,7 @@ Behaviours: 0 to 3 useful rules for this device, only if the device can do them 
 - Rentals ("rent"): a late return (overdue → keep_deposit or notify) and a weekend price (+20%) are the useful rules.
 Each rule:
 - description: one short English sentence for the host, e.g. "Lock the washing machine after 10 pm".
-- triggerKind: "stock_below" (fewer than N items left; needs a stock sensor), "weekday" (on some days), "overdue" (a rental is late), "after_hour" (after a time of day, 0-23).
+- triggerKind: "stock_below" (fewer than N items left; needs a stock sensor), "weekday" (on some days), "overdue" (a rental is late), "after_hour" (after a time of day, 0-23), "use_count" (every N uses, e.g. maintenance every 50 washes; needs a cycle counter).
 - triggerNumber / triggerDays: the value for the trigger (triggerDays only for "weekday", else []).
 - actionKind: "propose_purchase" (restock), "change_price", "notify", "lock" (needs a lock command), "unlock", "keep_deposit".
 - the other fields only when needed by the action, else null: purchaseItem, purchaseQuantity, purchaseMaxDollars, pricePercent, depositDollars, message.

@@ -74,7 +74,7 @@ const ICONS = {
 }
 const TYPES = ['access', 'use', 'rent']
 const DAYS = ['mon', 'tue', 'wed', 'thu', 'fri', 'sat', 'sun']
-const TRIGGERS = ['stock_below', 'weekday', 'overdue', 'after_hour']
+const TRIGGERS = ['stock_below', 'weekday', 'overdue', 'after_hour', 'use_count']
 // Same action names as src/behaviours.js (docs/PLAN.md section 4).
 const ACTIONS = ['propose_purchase', 'change_price', 'notify', 'lock', 'unlock', 'keep_deposit']
 const nullable = (type) => ({ type: [type, 'null'] })
@@ -130,7 +130,7 @@ const BEHAVIOUR_FIELDS = {
 }
 
 // → { serviceId, trigger: { kind, value }, action: { kind, ... }, text }
-//   trigger.value: stock_below → items left · weekday → ['sat','sun'] · overdue → hours late · after_hour → 0–23
+//   trigger.value: stock_below → items left · weekday → ['sat','sun'] · overdue → hours late · after_hour → 0–23 · use_count → every N uses
 //   action: propose_purchase { item, quantity?, maxAmount? (cents) } · change_price { percent } · notify { message }
 //           lock {} · unlock {} · keep_deposit { amount? (cents; absent = the whole deposit) }
 export async function textToBehaviour (text, services) {
@@ -154,6 +154,7 @@ function buildBehaviour (out, text) {
   if (out.triggerKind === 'stock_below') value = int(out.triggerNumber, 1, 1000)
   if (out.triggerKind === 'overdue') value = int(out.triggerNumber, 0, 72) ?? 0
   if (out.triggerKind === 'after_hour') value = int(out.triggerNumber, 0, 23)
+  if (out.triggerKind === 'use_count') value = int(out.triggerNumber, 1, 100_000)
   if (out.triggerKind === 'weekday') value = DAYS.filter((d) => (out.triggerDays || []).includes(d))
   if (value === null || (Array.isArray(value) && !value.length)) throw new Error('The rule needs a number or a day (e.g. "fewer than 3", "at the weekend", "after 10 pm").')
 
