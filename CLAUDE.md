@@ -91,7 +91,7 @@ Functions in `src/ai.js` (all `async`, host side only, throw `Error` with a mess
 - `when.kind`: `after_hour` (0–23) · `weekday` (`['sat','sun']`) · `stock_below` (N) · `counter_at` (every N uses) · `overdue` (hours late)
 - `do.kind`: `lock` · `unlock` · `set_price { price }` (cents; "+20%" is computed by the code from the device price) · `notify { text }` · `propose_purchase { reason }` · `keep_deposit { amount? }`
 - `deviceToService(descriptor)` → a device config (version 1) with a suggested price and 0–3 rules (plug-and-play, `POST /api/devices`). lock/unlock rules only if the device has those commands; doors get no rules.
-- `editDevice(text, currentConfig)` → the proposed config (`POST /api/devices/:id/edit`). The model returns only the changes (new name, new price or %, rules to add, rule numbers to remove); the code applies them, so `id`, `commands` and `version` never change (the hub increments `version` on Apply). Throws "I did not understand what to change…" if nothing changes.
+- `editDevice(text, currentConfig)` → `{ proposed }` or `{ reply }` (asks when a price, percentage or hour is missing: hours and percentages are accepted only if written; the sign of a percentage comes from the words "alza/raise" vs "sconto/lower") → the proposed config (`POST /api/devices/:id/edit`). The model returns only the changes (new name, new price or %, rules to add, rule numbers to remove); the code applies them, so `id`, `commands` and `version` never change (the hub increments `version` on Apply). Throws "I did not understand what to change…" if nothing changes.
 - `textToRule(text, device)` → `{ when, do, text }` · `textToService(text)` → a device config from a sentence ("dryer, 2 dollars a cycle").
 - `documentToRules(text, devices)` → `[{ deviceId, when, do, text }]` (house rules / manual → rules the devices can apply; demo documents in `prompts/documents/`).
 - Money guard: a price, deposit or amount from the model is kept only if that number is written in the host's text; percentages are computed by the code; "free"/"gratis" without numbers = 0.
@@ -110,11 +110,12 @@ Env: `DOLLAR_ASSET` (rgb:… id of HUSD, required to sell; never a ticker) · `U
 `DEMO_DEVICES=1` (an empty hub starts with washer 3.00 + dryer 2.00) · `QVAC_URL`, `QVAC_API_KEY` (AI). Files: `data/<hub>/devices/<id>.json` (+ `<id>.v<n>.json`), `devices-state.json`.
 Owner (`X-Hub-Key`): `GET /api/devices` → `[config + { state: { status: idle|running|locked, until? }, earned, uses, basePrice, lastTriggered }]` ·
 `POST /api/devices/chat { messages: [{ role: host|ai, text }] }` → `{ reply, proposed? }` · `POST /api/devices { config }` → saved (v1) ·
-`POST /api/devices/:id/edit { text }` → `{ proposed, diff: [{ field, from?, to? }] }` · `POST /api/devices/:id/apply { config }` → saved (version+1) ·
+`POST /api/devices/:id/edit { text, messages? }` → `{ proposed, diff: [{ field, from?, to? }] }` or `{ reply }` when the AI needs a missing value (`text` = all host requests since the last apply) ·
+`POST /api/devices/documents { text }` → `[{ deviceId, rule: { when, do }, text }]` (house rules → proposed rules, not saved; add the chosen ones to the device and `/apply`) · `POST /api/devices/:id/apply { config }` → saved (version+1) ·
 `POST /api/devices/:id/rollback { version }` · `DELETE /api/devices/:id` · `GET /api/devices/notices` (counter rules: maintenance, notify) ·
 `POST /api/devices/clock { hour: 0–23 | null }` (demo: pretend it is that hour, to show "locked after 22:00").
 Public: `GET /api/services` → `{ name, dollar, dollarId, services: [{ id, name, icon, type, price (now, incl. weekday price rules), unit, rules, state }] }` ·
-`POST /api/services/:id/order { hours? }` → `{ id (= payment id), serviceId, assetId, amount, hours, invoice, recipientId, status }` (price from the device file,
+`POST /api/services/:id/order { hours? }` → `{ id (= payment id), serviceId, assetId, amount, hours, invoice, recipientId, status }` (price from the device file incl. weekday and hour-band rules — `after_hour H → set_price` holds from H to the next band or midnight —,
 refused if running or locked) · `GET /api/orders/:id` → public payment + `serviceId` + `service`. On `paid`: device `running` for `USE_MS`, earned/uses updated.
 
 ## Rules (from the organisers — breaking them costs points)

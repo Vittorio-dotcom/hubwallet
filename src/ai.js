@@ -77,6 +77,15 @@ function written (x, text) {
 
 // Same guard for percentages: "+10%" is accepted only if 10 is written (the sign comes from the model: 10% off = -10).
 const percentWritten = (x, text) => (written(Math.abs(num(x) ?? NaN), text) ? int(x, -90, 200) : null)
+// …and the direction of a percentage comes from the host's words, not from the model ("alza del 10%" is +10).
+function percentSigned (p, text) {
+  if (!p) return p
+  const up = /(alza|aumenta|rincara|raise|increase|higher|more|più|\+\s*\d)/i.test(text)
+  const down = /(abbass|scont|ridu|dimin|lower|reduce|decrease|cheaper|discount|\boff\b|meno|-\s*\d)/i.test(text)
+  if (up && !down) return Math.abs(p)
+  if (down && !up) return -Math.abs(p)
+  return p
+}
 
 const ICONS = {
   washer: '🧺', dryer: '🌀', door: '🚪', locker: '🔐', fridge: '🍺', coffee: '☕', printer: '🖨️',
@@ -110,13 +119,20 @@ const ruleSchema = (extra = {}) => ({
 
 // Model output → { when, do }. Throws with a message for the host if the rule does not hold together.
 // source: the text the host wrote (money guard) · basePrice: the device price in cents (for "+20%")
-function buildRule (o, source, basePrice) {
+// suggest: true for plug-and-play suggestions (the host never wrote an hour: the proposal is shown and can be changed).
+function buildRule (o, source, basePrice, { suggest = false } = {}) {
   // lock/unlock "at 7" is a time of day: small models sometimes file the hour as a use counter
   if ((o.doKind === 'lock' || o.doKind === 'unlock') && o.whenKind === 'counter_at' && int(o.whenNumber, 0, 99) === o.whenNumber && o.whenNumber <= 23) o = { ...o, whenKind: 'after_hour' }
   if (!WHEN.includes(o.whenKind)) throw new Error('I could not tell when this rule should run.')
   if (!DO.includes(o.doKind)) throw new Error('I could not tell what this rule should do.')
   let value
-  if (o.whenKind === 'after_hour') value = int(o.whenNumber, 0, 23)
+  if (o.whenKind === 'after_hour') {
+    value = int(o.whenNumber, 0, 23)
+    // an hour the host did not write ("lock it at night" → 23?) is not invented: ask. "10 pm" is written as 10 → 22.
+    if (!suggest && value !== null && !written(value, source) && !(value >= 12 && written(value - 12, source))) {
+      throw new Error('From what time? For example "after 22:00".')
+    }
+  }
   if (o.whenKind === 'stock_below') value = int(o.whenNumber, 1, 1000)
   if (o.whenKind === 'counter_at') value = int(o.whenNumber, 1, 100_000)
   if (o.whenKind === 'overdue') value = int(o.whenNumber, 0, 72) ?? 0
@@ -126,7 +142,7 @@ function buildRule (o, source, basePrice) {
   let act
   if (o.doKind === 'lock' || o.doKind === 'unlock') act = { kind: o.doKind }
   if (o.doKind === 'set_price') {
-    const p = percentWritten(o.pricePercent, source)
+    const p = percentSigned(percentWritten(o.pricePercent, source), source)
     if (written(o.priceDollars, source)) act = { kind: 'set_price', price: cents(o.priceDollars) }
     else if (p && basePrice > 0) act = { kind: 'set_price', price: Math.round(basePrice * (1 + p / 100)) } // computed here
     else throw new Error('Which price? Write it, e.g. "3 dollars" or "+20%".')
@@ -180,7 +196,7 @@ export async function deviceToService (descriptor) {
   const rules = []
   for (const o of type === 'access' ? [] : out.rules || []) { // a door: the guest's key decides, no automatic rules
     try {
-      const r = buildRule(o, JSON.stringify(d), price)
+      const r = buildRule(o, JSON.stringify(d), price, { suggest: true })
       // lock/unlock only if the device can do it; a door is opened by the guest's key, never on a timer
       if ((r.do.kind === 'lock' || r.do.kind === 'unlock') && (type === 'access' || !commands.includes(r.do.kind))) continue
       if (!rules.some((x) => sameRule(x, r))) rules.push(r)
@@ -247,9 +263,11 @@ export async function chatDevice (messages, { existingIds = [] } = {}) {
   if (price === null) return { reply: `How much should one ${unit} of the ${lower} cost, in HUSD? For example "2.50".` }
 
   const rules = []
+  let ruleProblem = null
   for (const o of type === 'access' ? [] : out.rules || []) {
-    try { const r = buildRule(o, hostText, price); if (!rules.some((x) => sameRule(x, r))) rules.push(r) } catch {}
+    try { const r = buildRule(o, hostText, price); if (!rules.some((x) => sameRule(x, r))) rules.push(r) } catch (e) { ruleProblem = e.message }
   }
+  if (ruleProblem && !rules.length) return { reply: ruleProblem }
   if (!out.rulesAnswered && !rules.length && type !== 'access') {
     return { reply: `Any rules for the ${lower}? For example "lock it after 22:00" or "maintenance every 50 uses". Say "no" if none.` }
   }
@@ -260,6 +278,9 @@ export async function chatDevice (messages, { existingIds = [] } = {}) {
 }
 
 // ---------- edit a device in plain language ----------
+// → { proposed } (config, not saved) or { reply } (a question when something is missing: "How much?").
+// The host page sends in `text` everything the host wrote since the last applied change, so the answer to the
+// question ("10%") arrives together with the first request ("raise the price").
 // "raise it to 2.50 and lock it after 22:00" + current config → proposed config (same id, version unchanged:
 // the hub increments it when the host applies). The model returns only the CHANGES; this code applies them,
 // so fields nobody asked to change (id, commands, …) cannot be damaged.
@@ -280,9 +301,10 @@ export async function editDevice (text, current) {
       pricePercent: nullable('number'),
       removeRules: { type: 'array', items: { type: 'integer' }, maxItems: 10 },
       removeAllRules: { type: 'boolean' },
-      addRules: { type: 'array', maxItems: 4, items: ruleSchema() }
+      addRules: { type: 'array', maxItems: 4, items: ruleSchema() },
+      askedPriceChange: { type: 'boolean' } // the host wants another base price, even without saying how much
     },
-    required: ['newName', 'newPriceDollars', 'pricePercent', 'removeRules', 'removeAllRules', 'addRules'],
+    required: ['newName', 'newPriceDollars', 'pricePercent', 'removeRules', 'removeAllRules', 'addRules', 'askedPriceChange'],
     additionalProperties: false
   }, { maxTokens: 600 })
 
@@ -290,7 +312,7 @@ export async function editDevice (text, current) {
   const name = str(out.newName, 40)
   if (name && name !== cur.name) next.name = name
   // price: only a number the host wrote, or a percentage computed here
-  const p = percentWritten(out.pricePercent, text)
+  const p = percentSigned(percentWritten(out.pricePercent, text), text)
   // "make it free": decided by the code from the words, not by the model (it is money)
   const free = /\b(free|gratis|gratuit[ao])\b/i.test(text) && !/\d/.test(text)
   if (free) next.price = 0
@@ -299,18 +321,28 @@ export async function editDevice (text, current) {
   // rules: remove by number (1 = first), then add the new ones
   const drop = new Set((out.removeRules || []).map((n) => n - 1))
   next.rules = out.removeAllRules === true ? [] : rules.filter((_, i) => !drop.has(i))
+  let ruleProblem = null
+  let already = false
   for (const o of out.addRules || []) {
     try {
       const r = buildRule(o, text, next.price)
       if ((r.do.kind === 'lock' || r.do.kind === 'unlock') && cur.type === 'access') continue // never lock a guest out
-      // "lock it after 23" replaces "lock it after 22" (one time rule per action), it does not add a second one
-      const replaced = (x) => r.when.kind === 'after_hour' && x.when.kind === 'after_hour' && x.do.kind === r.do.kind
+      // "lock it after 23" replaces "lock it after 22" (one lock time and one unlock time); prices per hour band add up
+      const replaced = (x) => ['lock', 'unlock'].includes(r.do.kind) && r.when.kind === 'after_hour' && x.when.kind === 'after_hour' && x.do.kind === r.do.kind
       next.rules = next.rules.filter((x) => !replaced(x))
-      if (!next.rules.some((x) => sameRule(x, r))) next.rules.push(r)
-    } catch {}
+      if (next.rules.some((x) => sameRule(x, r))) already = true
+      else next.rules.push(r)
+    } catch (e) { ruleProblem = e.message } // e.g. "lock it at night": which hour? → asked below
   }
-  if (JSON.stringify(next) === JSON.stringify(cur)) throw new Error('I did not understand what to change. Try e.g. "price 2.50", "lock it after 22:00", "remove rule 1".')
-  return next
+  const pricedRule = next.rules.some((r) => r.do.kind === 'set_price' && !rules.some((x) => sameRule(x, r)))
+  if (out.askedPriceChange === true && next.price === cur.price && !pricedRule && !free) {
+    return { reply: 'How much? Write the new price (e.g. 3.50) or a percentage (e.g. +10%).' }
+  }
+  if (JSON.stringify(next) === JSON.stringify(cur)) {
+    if (already && !ruleProblem) return { reply: 'This rule is already on the device. Anything else?' }
+    return { reply: ruleProblem || 'I did not get what to change. You can change the price ("price 2.50", "+10%"), add a rule ("lock it after 22:00", "maintenance every 50 uses") or remove one ("remove rule 1").' }
+  }
+  return { proposed: next }
 }
 
 // ---------- one rule from plain language (for a device) ----------

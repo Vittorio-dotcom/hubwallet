@@ -5,7 +5,7 @@ Keep only rules a device can enforce:
 - doKind: "lock", "unlock", "set_price" (pricePercent for "+10%", or priceDollars), "propose_purchase" (reason: "maintenance", "filter replacement"…), "notify" (reason = message), "keep_deposit".
 Skip everything a machine cannot check (e.g. "do not wash shoes", "empty the machine within 15 minutes", "write to the manager") and the normal prices (they are already in the device).
 A closing time means "lock" at that hour AND "unlock" at the opening hour, for EACH device it applies to.
-Write one rule per device: if a sentence is about "the machines", make one rule for each device.
+Write one rule per device: if a sentence is about "the machines", make one rule for each device. If a sentence names one device (e.g. "the dryer filter", "il filtro dell'asciugatrice"), the rule belongs to THAT device only.
 
 Each rule: deviceId (from the list below), description (one short English sentence for the host), whenKind, whenNumber, whenDays ([] unless "weekday"), doKind, priceDollars, pricePercent, reason, depositDollars (null when not needed). Copy numbers exactly as written.
 

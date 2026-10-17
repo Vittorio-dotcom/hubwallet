@@ -13,7 +13,8 @@
 //   GET  /devices                    → [config + { state, earned, uses }]
 //   POST /devices/chat {messages}    → { reply, proposed? }   add a device by chatting with the AI (not saved)
 //   POST /devices {config}           → saved config (version 1)
-//   POST /devices/:id/edit {text}    → { proposed, diff }     AI proposal (not saved)
+//   POST /devices/:id/edit {text}    → { proposed, diff } or { reply } (the AI asks: "How much?", "From what time?")
+//   POST /devices/documents {text}   → [{ deviceId, rule: { when, do }, text }]   rules from a house document (not saved)
 //   POST /devices/:id/apply {config} → saved config (version + 1; the previous one is kept)
 //   POST /devices/:id/rollback {version} · DELETE /devices/:id
 //   GET  /devices/notices            → what the rules raised (maintenance, notify)
@@ -25,7 +26,7 @@
 import fs from 'node:fs'
 import path from 'node:path'
 import express from 'express'
-import { chatDevice, editDevice, ruleText } from './ai.js'
+import { chatDevice, editDevice, documentToRules, ruleText } from './ai.js'
 
 const TYPES = ['use', 'rent', 'access']
 const WHEN = ['after_hour', 'weekday', 'stock_below', 'counter_at', 'overdue']
@@ -147,11 +148,17 @@ export class DeviceLayer {
     const last = [...ev].reverse().find((e) => e.h <= h) || ev[ev.length - 1]
     return last.lock
   }
-  // Price now: the base price, or the price of a "weekday → set_price" rule for today. Computed here, never by the AI.
+  // Price now, computed here (never by the AI): the base price, then a "weekday → set_price" rule for today, then an
+  // hour band "after_hour H → set_price": from H until the next band or midnight (before the first band: no band).
   effectivePrice (cfg) {
-    const day = DAYS[new Date().getDay()]
-    const r = (cfg.rules || []).filter((x) => x.when.kind === 'weekday' && x.do.kind === 'set_price' && x.when.value.includes(day)).pop()
-    return r ? r.do.price : cfg.price
+    const rules = (cfg.rules || []).filter((x) => x.do.kind === 'set_price')
+    let price = cfg.price
+    const day = rules.filter((x) => x.when.kind === 'weekday' && x.when.value.includes(DAYS[new Date().getDay()])).pop()
+    if (day) price = day.do.price
+    const h = this.hour()
+    const band = rules.filter((x) => x.when.kind === 'after_hour' && x.when.value <= h).sort((a, b) => a.when.value - b.when.value).pop()
+    if (band) price = band.do.price
+    return price
   }
   status (cfg) {
     const rt = this.rt(cfg.id)
@@ -227,10 +234,24 @@ export class DeviceLayer {
     }))
     r.post('/devices/chat', owner, wrap((req) => chatDevice(req.body?.messages, { existingIds: this.list().map((d) => d.id) })))
     r.post('/devices', owner, wrap((req) => this.add(req.body?.config)))
+    // { text } = what the host wrote since the last applied change (the page joins the answers to the AI's questions);
+    // { messages } alone works too. → { proposed, diff } or { reply } when the AI needs something ("How much?").
     r.post('/devices/:id/edit', owner, wrap(async (req) => {
       const current = this.get(req.params.id)
-      const proposed = validateDevice(await editDevice(req.body?.text, current), { current })
+      const msgs = Array.isArray(req.body?.messages) ? req.body.messages : []
+      const text = req.body?.text || msgs.filter((m) => m?.role === 'host').map((m) => m.text).join('. ')
+      const r = await editDevice(text, current)
+      if (r.reply) return { reply: r.reply }
+      const proposed = validateDevice(r.proposed, { current })
       return { proposed, diff: diffDevices(current, proposed) }
+    }))
+    // House documents (rules, contract, manual) → proposed rules per device, NOT saved: the page adds the chosen ones
+    // to the device config and saves with /devices/:id/apply. The document text is not stored by the hub.
+    r.post('/devices/documents', owner, wrap(async (req) => {
+      const text = String(req.body?.text || '').trim()
+      if (!text) throw new Error('Paste the text of the document first.')
+      if (text.length > 6000) throw new Error('Document too long for the local AI: paste the part with the rules (max 6000 characters).')
+      return (await documentToRules(text, this.list())).map((r) => ({ deviceId: r.deviceId, rule: { when: r.when, do: r.do }, text: r.text }))
     }))
     r.post('/devices/:id/apply', owner, wrap((req) => this.apply(req.params.id, req.body?.config)))
     r.post('/devices/:id/rollback', owner, wrap((req) => this.rollback(req.params.id, Number(req.body?.version))))
