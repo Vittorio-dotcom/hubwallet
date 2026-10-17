@@ -62,9 +62,9 @@ Tasks about stay keys and the door (3, part of 19) and the bike (5) are **droppe
 ### Vittorio — interfaces (pages call the HTTP API of plan section 6 and `CLAUDE.md`)
 | # | Task | Plan | Due | Status |
 |---|---|---|---|---|
-| 19 | Host app: services, stays (send key → goes to "To sign"), proposals inbox, earnings, activity log with explorer links | 2.6, 6 | Sat 18:00 | todo |
+| 19 | Host app (docs/HOST-APP.md): wallet cards, hubs with earnings + sweep, To sign, devices, add device, edit by text with diff + Apply | 2.6, 6 | Sat 18:00 | done on example data; next: wire to the real routes |
 | 20 | "To sign" view in the host app: pending items with summary, approve / reject (the signer signs) | 2.3 | Sat 18:00 | todo |
-| 21 | Guest app (rebuild): my key, my HUSD, services of the hub (QR link), order → pay → live status | 2.6 A–C | Sat 18:00 | todo |
+| 21 | Guest app (rebuild): wallet cards (swipe, connect wallet), hub search, devices, pay → live status | 2.6 A | Sat 18:00 | done on example data; next: pay with `/api/check` + `/api/pay-request` (API_usage.md §4) |
 | 22 | Device pages: big state, countdown, device functions with `lastTriggered`, QR to the guest app | 4 | Sat evening | todo |
 | 23 | Host AI panel: create services/behaviours by text, add a device by descriptor, upload documents | 3 | Sun 10:00 | todo |
 | 27 | "Ask the home" box in the guest app (calls `/api/ai/bundle`) | 3 | Sun 10:00 | todo |
@@ -74,6 +74,12 @@ Tasks about stay keys and the door (3, part of 19) and the bike (5) are **droppe
 |---|---|---|---|---|
 | 28 | Choose the demo PC (Vittorio's Linux or Alessandro's Mac) and rehearse the full demo there | all | Sun 11:00 | todo |
 | 29 | Pitch (5 min), demo script, answers to likely questions | Vittorio + Lapo | Sun 12:00 | todo |
+
+### Device layer (from docs/HOST-APP.md — please confirm)
+| # | Task | Who | Due | Status |
+|---|---|---|---|---|
+| 34 | Device/service layer on top of hub-core: one JSON per device in `data/<hub>/devices/` with versions, validation, routes `/api/devices` (list, add, edit → proposed + diff, apply, rollback) and public `/api/services` + `/api/services/:id/order` via `requestPayment`; `paid` → device `running` | Alessandro (or who he agrees) | Sat 18:00 | proposed |
+| 35 | AI: `editDevice(text, currentJson)` → proposed device JSON, and `deviceToService(descriptor)` in the same format (HOST-APP.md §2) | Lapo | Sat evening | proposed |
 
 ### Stretch (only after the Sunday 10:00 milestone)
 | # | Task | Who | Status |
