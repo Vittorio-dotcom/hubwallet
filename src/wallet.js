@@ -251,7 +251,18 @@ export class WatchWallet {
   // validation: rgb-lib checks the asset history back to genesis), sends ACKs,
   // updates confirmations. Returns an error string instead of throwing: a failed refresh
   // (proxy or indexer down) must not stop the payment watcher.
-  refresh () { return this.run((w) => { try { w.refreshWallet() } catch (e) { return String(e.message || e) } }) }
+  // fast = true: no indexer sync inside rgb-lib (skip_sync). Settling an incoming witness payment
+  // then costs ~2 s instead of ~30 s (rgb-lib syncs twice while settling, measured in docs/PERF.md);
+  // the txo it needs is already in the database since the consignment was accepted. The caller
+  // syncs once afterwards (Hub.syncWallet). Spends keep the full refresh (bdk must see spent outputs).
+  refresh ({ fast = false } = {}) {
+    return this.run((w) => {
+      try {
+        if (fast) w.client.wallet.refresh(w.client.getOnline(), null, [], true)
+        else w.refreshWallet()
+      } catch (e) { return String(e.message || e) }
+    })
+  }
 
   transfers (assetId) { return this.run((w) => plain(w.listTransfers(assetId))) }
 

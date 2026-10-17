@@ -129,9 +129,9 @@ export class Hub extends EventEmitter {
       if (now < this.followUntil && (open || now < this.followSpend)) {
         this.burstTimer = setTimeout(tick, 5_000)
       } else {
-        this.burstTimer = null
+        // Sync 20 s later: it freezes the hub for 10–25 s, and pages first need to read "paid".
         this.followUntil = 0
-        await this.syncWallet()
+        this.burstTimer = setTimeout(() => { this.burstTimer = null; this.syncWallet() }, 20_000)
       }
     }
     this.burstTimer = setTimeout(tick, 0)
@@ -214,7 +214,8 @@ export class Hub extends EventEmitter {
     this.walletCache = null
     try {
       // 1. Download consignments, validate them, update confirmations.
-      const err = await this.wallet.refresh()
+      // Fast refresh (no sync inside rgb-lib) while only incoming payments are followed.
+      const err = await this.wallet.refresh({ fast: Date.now() >= this.followSpend })
       if (err) console.error('refresh:', err)
 
       // 2. Match every open payment with the transfer rgb-lib has for its recipientId.
