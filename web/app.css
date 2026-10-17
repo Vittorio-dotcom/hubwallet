@@ -1,5 +1,4 @@
 /* HubWallet web — shared look for the guest app, host app and device pages.
-[hidden] { display: none !important }
    Mobile first. Colors are tokens with a light and a dark set. */
 :root {
   --bg: #f1f4f3; --surface: #ffffff; --surface-2: #f6f8f7; --line: #d8e0de;
@@ -84,3 +83,22 @@ button:focus-visible, input:focus-visible, select:focus-visible { outline: 2px s
 .notice.ok { background: var(--ok-soft); color: var(--ok) } .notice.bad { background: var(--bad-soft); color: var(--bad) }
 a { color: var(--accent) }
 @media (prefers-reduced-motion: no-preference) { .sheet { animation: up .18s ease-out } @keyframes up { from { transform: translateY(14px); opacity: 0 } } }
+
+/* hidden must win over any display rule (tabs, sheets) */
+[hidden] { display: none !important }
+.stack { display: flex; flex-direction: column; gap: 10px }
+.input { font: inherit; padding: 11px 12px; border-radius: 12px; border: 1px solid var(--line); background: var(--surface); color: var(--ink); min-width: 0 }
+
+/* wallet carousel: one card per wallet, swipe to change */
+.carousel { display: grid; grid-auto-flow: column; grid-auto-columns: 100%; gap: 12px; overflow-x: auto; scroll-snap-type: x mandatory; scrollbar-width: none; border-radius: 20px }
+.carousel::-webkit-scrollbar { display: none }
+.wcard { scroll-snap-align: start; width: 100%; min-height: 150px; text-align: left; border: 0; border-radius: 20px; padding: 20px; background: var(--accent); color: var(--accent-ink); display: flex; flex-direction: column; justify-content: center; gap: 6px }
+.wcard .label { color: inherit; opacity: .85 }
+.wcard .amount { font-size: 38px; font-weight: 700; letter-spacing: -.02em; font-variant-numeric: tabular-nums }
+.wcard .unit { font-size: 18px; font-weight: 600; opacity: .85 }
+.wcard .hint { font-size: 13px; opacity: .85 }
+.wcard.add { background: var(--surface); color: var(--ink); border: 2px dashed var(--line) }
+.wcard.off { background: var(--surface-2); color: var(--ink); border: 1px solid var(--line) }
+.dots { display: flex; justify-content: center; gap: 6px }
+.dots span { width: 7px; height: 7px; border-radius: 50%; background: var(--line) }
+.dots span.on { background: var(--accent) }

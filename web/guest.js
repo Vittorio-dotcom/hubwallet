@@ -1,23 +1,20 @@
 // HubWallet guest app logic.
-// Talks to the guest's own wallet (same origin: /api/me, /api/receive, /api/pay, /api/refresh, /api/transfers)
-// and to the public API of the hubs nearby (/api/services, /api/services/:id/order, /api/orders/:id).
-// Hubs come from ?hubs=http://ip:8080,http://ip:8081 (remembered on this device).
-// If the wallet or every hub is unreachable, it shows example data so the interface can be tried without a backend.
+// - Wallets: a list of WDK wallet services (src/guest.js: /api/me, /api/receive, /api/pay, /api/refresh, /api/transfers),
+//   kept on this device. Swiping the wallet card changes the active wallet; payments use the active one.
+// - Hubs: public API (/api/services, /api/services/:id/order, /api/orders/:id). A hub is added only after the guest
+//   confirms it (search bar or QR link), and can be used from a distance.
+// - If no hub answers, example devices are shown, marked "Example data".
 
 const $ = (s) => document.querySelector(s)
 const money = (cents) => (Number(cents || 0) / 100).toFixed(2)
-const qs = new URLSearchParams(location.search)
-// Trusted hubs are remembered on this device. Hubs arriving from a link (QR) are only *offered*:
-// the guest sees the full address and must confirm before their devices are listed.
-const parse = (v) => String(v || '').split(',').map((h) => h.trim().replace(/\/$/, '')).filter((h) => /^https?:\/\/[^/]+$/.test(h))
-const stored = (() => { try { return localStorage.getItem('hubs') } catch { return null } })()
-let HUBS = parse(stored)
-if (!HUBS.length && !qs.get('hubs')) HUBS = ['http://localhost:8080']
-let offered = parse(qs.get('hubs')).filter((h) => !HUBS.includes(h))
-const saveHubs = () => { try { localStorage.setItem('hubs', HUBS.join(',')) } catch {} }
 const DOLLAR = 'HUSD'
+const EXAMPLE_WALLET = 'example:wallet'
 
-// ---------- small DOM helper: builds elements with text only (no HTML injection) ----------
+// ---------- storage (per device, best effort) ----------
+const load_ = (k, d) => { try { return JSON.parse(localStorage.getItem(k)) ?? d } catch { return d } }
+const save_ = (k, v) => { try { localStorage.setItem(k, JSON.stringify(v)) } catch {} }
+
+// ---------- DOM helper: elements with text only (no HTML injection) ----------
 function el (tag, props = {}, ...children) {
   const n = document.createElement(tag)
   for (const [k, v] of Object.entries(props)) {
@@ -28,62 +25,69 @@ function el (tag, props = {}, ...children) {
   for (const c of children.flat()) if (c !== null && c !== undefined && c !== false) n.append(c instanceof Node ? c : String(c))
   return n
 }
-
 async function api (url, body) {
   const r = await fetch(url, body ? { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) } : {})
   const j = await r.json().catch(() => ({}))
   if (!r.ok) throw new Error(j.error || `Request failed (${r.status})`)
   return j
 }
-
-// ---------- example data (used only when the backend does not answer) ----------
-const EXAMPLE = {
-  me: {
-    address: 'tb1p…example',
-    btc: { vanilla: { spendable: 48210 } },
-    assets: { nia: [
-      { assetId: 'rgb:example-husd', ticker: DOLLAR, name: 'HubWallet test dollar', balance: { spendable: 10000 } }
-    ] }
-  },
-  transfers: [
-    { kind: 'ReceiveBlind', status: 'Settled', assignments: [{ Fungible: 10000 }], createdAt: Date.now() / 1000 - 3600, txid: null }
-  ],
-  hubs: [
-    { url: 'example-a', name: 'Lavanderia', services: [
-      { id: 'washer', name: 'Washing machine', icon: '🧺', type: 'use', price: 200, device: { state: 'idle' } },
-      { id: 'dryer', name: 'Dryer', icon: '🌀', type: 'use', price: 150, device: { state: 'idle' } }
-    ] }
-  ]
+const normUrl = (v) => {
+  let u = String(v || '').trim().replace(/\/$/, '')
+  if (u && !/^https?:\/\//.test(u)) u = 'http://' + u
+  return /^https?:\/\/[^/\s]+$/.test(u) ? u : null
 }
 
-let me = null; let transfers = []; let hubs = []; let demo = false; let busy = false
+// ---------- example data (only for trying the page without a backend) ----------
+const EXAMPLE = {
+  me: { address: 'tb1p…example', btc: { vanilla: { spendable: 48210 } },
+    assets: { nia: [{ assetId: 'rgb:example-husd', ticker: DOLLAR, name: 'HubWallet test dollar', balance: { spendable: 10000 } }] } },
+  transfers: [{ kind: 'ReceiveBlind', status: 'Settled', assignments: [{ Fungible: 10000 }], createdAt: Date.now() / 1000 - 3600 }],
+  hubs: [{ url: 'example', name: 'Lavanderia', services: [
+    { id: 'washer', name: 'Washing machine', icon: '🧺', type: 'use', price: 200, device: { state: 'idle' } },
+    { id: 'dryer', name: 'Dryer', icon: '🌀', type: 'use', price: 150, device: { state: 'idle' } }
+  ] }]
+}
+const PROVIDERS = [
+  { name: 'Iris Wallet', note: 'Android, by the RGB-Tools team', url: 'https://iriswallet.com' },
+  { name: 'BitMask', note: 'browser extension and web', url: 'https://bitmask.app' },
+  { name: 'KaleidoSwap', note: 'desktop, mobile (Rate) and browser extension', url: 'https://kaleidoswap.com' }
+]
 
-async function load () {
-  let liveWallet = true; let liveHubs = 0
-  try { me = await api('/api/me') } catch { liveWallet = false }
-  try { transfers = liveWallet ? await api('/api/transfers') : [] } catch { transfers = [] }
-  hubs = []
-  for (const url of HUBS) {
-    try { const h = await api(url + '/api/services'); hubs.push({ url, name: h.name, dollar: h.dollar, services: h.services || [] }); liveHubs++ } catch {}
-  }
-  demo = !liveWallet || liveHubs === 0
-  if (!liveWallet) { me = EXAMPLE.me; transfers = EXAMPLE.transfers }
-  if (liveHubs === 0) hubs = EXAMPLE.hubs
+// ---------- state ----------
+let wallets = load_('wallets', []) // [{ url, label }]
+let active = Math.min(load_('activeWallet', 0), Math.max(0, wallets.length - 1))
+let hubUrls = load_('hubUrls', [])
+let offered = (new URLSearchParams(location.search).get('hubs') || '').split(',').map(normUrl).filter((u) => u && !hubUrls.includes(u))
+const walletData = {} // url → { me, transfers, ok }
+let hubs = []; let demoHubs = false; let busy = false; let query = ''
+
+const current = () => wallets[active]
+const data = () => walletData[current()?.url] || null
+const dollar = (d = data()) => (d?.me?.assets?.nia || []).find((a) => a.ticker === DOLLAR)
+const keys = () => (data()?.me?.assets?.nia || []).filter((a) => a.ticker.startsWith('STAY') && a.balance.spendable > 0)
+const walletApi = (path, body) => current().url === EXAMPLE_WALLET ? Promise.reject(new Error('Example wallet: nothing is really paid.')) : api(current().url + path, body)
+
+async function loadWallet (w) {
+  if (w.url === EXAMPLE_WALLET) { walletData[w.url] = { me: EXAMPLE.me, transfers: EXAMPLE.transfers, ok: true }; return }
+  try {
+    const me = await api(w.url + '/api/me')
+    const transfers = await api(w.url + '/api/transfers').catch(() => [])
+    walletData[w.url] = { me, transfers, ok: true }
+  } catch { walletData[w.url] = { ok: false } }
+}
+async function loadHubs () {
+  const found = []
+  for (const url of hubUrls) { try { const h = await api(url + '/api/services'); found.push({ url, name: h.name, services: h.services || [] }) } catch {} }
+  demoHubs = found.length === 0
+  hubs = demoHubs ? EXAMPLE.hubs : found
+}
+async function refresh () {
+  await Promise.all([...wallets.map(loadWallet), loadHubs()])
   render()
 }
 
-const dollar = () => (me?.assets?.nia || []).find((a) => a.ticker === DOLLAR)
-const keys = () => (me?.assets?.nia || []).filter((a) => a.ticker.startsWith('STAY') && a.balance.spendable > 0)
-// Weak binding by name (until keys carry the issuing hub's identity): the hub must have a name,
-// no other connected hub may share it, and the key name must be exactly "<hub name> stay ...".
-function keyFor (h) {
-  const name = String(h.name || '').trim()
-  if (!name) return null
-  if (hubs.filter((x) => String(x.name || '').trim().toLowerCase() === name.toLowerCase()).length > 1) return null
-  return keys().find((k) => String(k.name || '').startsWith(name + ' stay ')) || null
-}
+// ---------- rendering ----------
 const KIND = { access: 'Access', use: 'Pay per use', rent: 'Rental' }
-
 function stateOf (s) {
   const st = s.device?.state
   if (s.type === 'access') return st === 'open' ? ['Open', 'on'] : ['Locked', 'free']
@@ -91,91 +95,164 @@ function stateOf (s) {
   if (st === 'rented') return [`Rented · ${Math.max(0, Math.ceil(((s.device.until || 0) - Date.now()) / 1000))} s`, 'busy']
   return ['Available', 'free']
 }
-function priceText (s) {
-  if (s.type === 'access') return 'With your key'
-  return `${money(s.price)} ${DOLLAR} ${s.type === 'rent' ? '/ hour' : '/ use'}`
+const priceText = (s) => s.type === 'access' ? 'With your key' : `${money(s.price)} ${DOLLAR} ${s.type === 'rent' ? '/ hour' : '/ use'}`
+
+function walletCard (w, i) {
+  const d = walletData[w.url]
+  if (!d?.ok) {
+    return el('div', { class: 'wcard off', role: 'group', 'aria-label': `Wallet ${i + 1}` },
+      el('span', { class: 'label' }, w.label || 'Wallet'),
+      el('strong', {}, 'Not reachable'),
+      el('span', { class: 'small' }, w.url),
+      el('div', { class: 'row' }, el('button', { class: 'btn', type: 'button', on: { click: refresh } }, 'Retry'),
+        el('button', { class: 'btn', type: 'button', on: { click: () => removeWallet(i) } }, 'Remove')))
+  }
+  return el('button', { class: 'wcard', type: 'button', 'aria-label': `${w.label}: open movements, address and keys`, on: { click: () => { if (i === active) show('wallet') } } },
+    el('span', { class: 'label' }, w.label || 'Wallet'),
+    el('span', {}, el('span', { class: 'amount' }, money(dollar(d)?.balance.spendable || 0)), ' ', el('span', { class: 'unit' }, DOLLAR)),
+    el('span', { class: 'hint' }, `${(d.me.btc?.vanilla?.spendable ?? 0).toLocaleString('en')} sats for fees · details ›`))
 }
 
 function render () {
-  $('#demo-tag').hidden = !demo
-  $('#offer').replaceChildren(...offered.map((url) => el('div', { class: 'card' },
-    el('span', { class: 'label' }, 'New hub from a link'),
-    el('span', { class: 'mono' }, url),
-    el('p', { class: 'small muted' }, 'Connect only if you are in front of this hub (for example you scanned its QR code).'),
-    el('div', { class: 'row' },
-      el('button', { class: 'btn primary', type: 'button', on: { click: () => { HUBS.push(url); offered = offered.filter((x) => x !== url); saveHubs(); load() } } }, 'Connect'),
-      el('button', { class: 'btn', type: 'button', on: { click: () => { offered = offered.filter((x) => x !== url); render() } } }, 'Ignore')))))
-  $('#amount').textContent = money(dollar()?.balance.spendable || 0)
-  $('#unit').textContent = DOLLAR
-  const k = keys().length
-  $('#balance-hint').textContent = `${k ? k + (k > 1 ? ' keys · ' : ' key · ') : ''}Movements, address and keys ›`
+  $('#demo-tag').hidden = !demoHubs && current()?.url !== EXAMPLE_WALLET
 
+  // offered hubs (from a QR link): connect only after confirmation
+  $('#offer').replaceChildren(...offered.map((url) => el('div', { class: 'card' },
+    el('span', { class: 'label' }, 'Hub from a link'), el('span', { class: 'mono' }, url),
+    el('p', { class: 'small muted' }, 'Connect only if you trust this hub (for example you scanned its QR code).'),
+    el('div', { class: 'row' },
+      el('button', { class: 'btn primary', type: 'button', on: { click: () => addHub(url) } }, 'Connect'),
+      el('button', { class: 'btn', type: 'button', on: { click: () => { offered = offered.filter((x) => x !== url); render() } } }, 'Ignore')))))
+
+  // wallet carousel
+  const cards = wallets.map(walletCard)
+  cards.push(el('button', { class: 'wcard add', type: 'button', on: { click: () => show('connect') } },
+    el('span', { class: 'label' }, wallets.length ? 'Add a wallet' : 'No wallet yet'),
+    el('strong', { style: 'font-size:22px' }, wallets.length ? '+ Add wallet' : 'Connect a wallet'),
+    el('span', { class: 'hint' }, 'HubWallet (WDK) or another RGB wallet ›')))
+  const car = $('#wallets'); const keep = car.scrollLeft
+  car.replaceChildren(...cards)
+  car.scrollLeft = keep
+  $('#dots').replaceChildren(...cards.map((_, i) => el('span', { class: i === active ? 'on' : '' })))
+
+  // devices of the connected hubs, filtered by the search text
+  const q = query.toLowerCase()
   const tiles = hubs.flatMap((h) => h.services.filter((s) => KIND[s.type]).map((s) => ({ h, s })))
+    .filter(({ h, s }) => !q || h.name.toLowerCase().includes(q) || s.name.toLowerCase().includes(q))
   $('#devices').replaceChildren(...(tiles.length
     ? tiles.map(({ h, s }) => {
         const [label, cls] = stateOf(s)
         return el('button', { class: 'tile', type: 'button', on: { click: () => openDevice(h, s) }, 'aria-label': `${s.name}, ${priceText(s)}` },
-          el('span', { class: 'ic', 'aria-hidden': 'true' }, s.icon || '🧩'),
-          el('span', { class: 'name' }, s.name),
-          el('span', { class: 'price' }, priceText(s)),
-          el('span', { class: `pill ${cls}` }, label),
-          hubs.length > 1 ? el('span', { class: 'where' }, h.name) : null)
+          el('span', { class: 'ic', 'aria-hidden': 'true' }, s.icon || '🧩'), el('span', { class: 'name' }, s.name),
+          el('span', { class: 'price' }, priceText(s)), el('span', { class: `pill ${cls}` }, label), el('span', { class: 'where' }, h.name))
       })
-    : [el('div', { class: 'empty', style: 'grid-column:1/-1' }, 'No devices nearby. Scan the QR code on a device.')]))
+    : [el('div', { class: 'empty', style: 'grid-column:1/-1' }, q ? 'No device matches your search.' : 'No hub connected. Search a hub above or scan its QR code.')]))
 
-  // wallet sheet
-  $('#address').textContent = me?.address || '–'
-  $('#sats').textContent = `${(me?.btc?.vanilla?.spendable ?? 0).toLocaleString('en')} sats`
-  $('#moves').replaceChildren(...(transfers.length
-    ? [...transfers].sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0)).map((t) => {
+  // wallet sheet (active wallet)
+  const d = data()
+  $('#wallet-title').textContent = current()?.label || 'Wallet'
+  $('#address').textContent = d?.me?.address || '–'
+  const tr = d?.transfers || []
+  $('#moves').replaceChildren(...(tr.length
+    ? [...tr].sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0)).map((t) => {
         const amt = (t.assignments || []).reduce((s, a) => s + Number(a.Fungible || 0), 0) || Number(t.requestedAssignment?.Fungible || 0)
         const incoming = String(t.kind).startsWith('Receive') || t.kind === 'Issuance'
         const when = t.createdAt ? new Date(t.createdAt * 1000).toLocaleString('en', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' }) : ''
-        return el('div', {},
-          el('span', { 'aria-hidden': 'true' }, incoming ? '↓' : '↑'),
+        return el('div', {}, el('span', { 'aria-hidden': 'true' }, incoming ? '↓' : '↑'),
           el('div', { class: 'grow' }, el('div', {}, incoming ? 'Received' : 'Sent'), el('div', { class: 'small muted' }, `${when} · ${t.status}`)),
-          el('span', { class: 'mono' }, amt === 1 ? '1 unit' : money(amt)),
+          el('span', { class: 'mono' }, money(amt)),
           t.txid ? el('a', { href: 'https://mutinynet.com/tx/' + t.txid, target: '_blank', rel: 'noopener', class: 'small' }, 'tx') : null)
       })
     : [el('div', { class: 'empty' }, 'No movements yet.')]))
-  $('#keys').replaceChildren(...(keys().length
-    ? keys().map((a) => el('div', { class: 'key' }, el('span', { class: 'label' }, 'Stay key · RGB asset'), el('strong', {}, a.name), el('span', { class: 'mono' }, a.ticker)))
-    : [el('div', { class: 'empty' }, 'No key yet. Create an invoice in "Address" and give it to the host.')]))
+  $('#tab-keys').replaceChildren(...(keys().length
+    ? keys().map((a) => el('div', { class: 'key' }, el('span', { class: 'label' }, 'Key · RGB asset'), el('strong', {}, a.name), el('span', { class: 'mono' }, a.ticker)))
+    : [el('div', { class: 'empty' }, 'No access keys in this wallet.')]))
 
-  // user sheet
-  $('#hub-list').replaceChildren(...hubs.map((h) => el('div', {}, el('span', { class: 'grow' }, h.name), el('span', { class: 'small muted mono' }, demo ? 'example' : h.url.replace(/^https?:\/\//, '')))))
+  // user + connect sheets
+  $('#wallet-list').replaceChildren(...(wallets.length ? wallets.map((w, i) => el('div', {}, el('span', { class: 'grow' }, w.label), el('span', { class: 'small muted mono' }, w.url === EXAMPLE_WALLET ? 'example' : w.url),
+    el('button', { class: 'btn', type: 'button', on: { click: () => removeWallet(i) } }, 'Remove'))) : [el('div', { class: 'small muted' }, 'No wallet connected.')]))
+  $('#hub-list').replaceChildren(...(hubUrls.length ? hubUrls.map((u) => el('div', {}, el('span', { class: 'grow mono small' }, u),
+    el('button', { class: 'btn', type: 'button', on: { click: () => { hubUrls = hubUrls.filter((x) => x !== u); save_('hubUrls', hubUrls); refresh() } } }, 'Remove'))) : [el('div', { class: 'small muted' }, 'No hub connected.')]))
+  $('#providers').replaceChildren(...PROVIDERS.map((p) => el('div', {}, el('div', { class: 'grow' }, el('div', {}, p.name), el('div', { class: 'small muted' }, `${p.note} · not supported in the demo`)),
+    el('a', { href: p.url, target: '_blank', rel: 'noopener', class: 'small' }, 'Website'))))
 }
 
-// ---------- sheets ----------
+// ---------- carousel: the visible card is the active wallet ----------
+$('#wallets').addEventListener('scroll', () => {
+  const car = $('#wallets')
+  const i = Math.round(car.scrollLeft / car.clientWidth)
+  if (i !== active && i < wallets.length) { active = i; save_('activeWallet', active); render() }
+}, { passive: true })
+
+// ---------- wallets ----------
+async function addWallet (url, label) {
+  if (wallets.some((w) => w.url === url)) { $('#connect-msg').replaceChildren(el('div', { class: 'notice bad' }, 'This wallet is already connected.')); return }
+  const w = { url, label: label || `Wallet ${wallets.length + 1}` }
+  await loadWallet(w)
+  if (!walletData[url].ok) { $('#connect-msg').replaceChildren(el('div', { class: 'notice bad' }, `No wallet answers at ${url}.`)); return }
+  wallets.push(w); active = wallets.length - 1
+  save_('wallets', wallets); save_('activeWallet', active)
+  show(null); render()
+  $('#wallets').scrollLeft = active * $('#wallets').clientWidth
+}
+function removeWallet (i) {
+  wallets.splice(i, 1); active = Math.max(0, Math.min(active, wallets.length - 1))
+  save_('wallets', wallets); save_('activeWallet', active); render()
+}
+$('#connect-form').addEventListener('submit', (e) => {
+  e.preventDefault()
+  const url = normUrl($('#wallet-url').value)
+  if (!url) { $('#connect-msg').replaceChildren(el('div', { class: 'notice bad' }, 'Enter an address like http://127.0.0.1:8090.')); return }
+  addWallet(url, 'HubWallet')
+})
+$('#example-wallet').onclick = () => addWallet(EXAMPLE_WALLET, 'Example wallet')
+
+// ---------- hubs: search by name, or connect by address ----------
+function addHub (url) {
+  if (!hubUrls.includes(url)) hubUrls.push(url)
+  offered = offered.filter((x) => x !== url)
+  save_('hubUrls', hubUrls); $('#search-out').replaceChildren(); refresh()
+}
+$('#search-form').addEventListener('submit', async (e) => {
+  e.preventDefault()
+  const text = $('#search').value.trim()
+  const url = /[.:]/.test(text) ? normUrl(text) : null
+  if (!url) { query = text; render(); return } // a name: filter the connected hubs and their devices
+  query = ''
+  $('#search-out').replaceChildren(el('p', { class: 'small muted' }, `Looking for a hub at ${url}…`))
+  try {
+    const h = await api(url + '/api/services')
+    $('#search-out').replaceChildren(el('div', { class: 'card' },
+      el('span', { class: 'label' }, 'Hub found'), el('strong', {}, h.name || 'Unnamed hub'), el('span', { class: 'mono small' }, url),
+      el('span', { class: 'small muted' }, `${(h.services || []).length} devices`),
+      hubUrls.includes(url) ? el('span', { class: 'small' }, 'Already connected.')
+        : el('button', { class: 'btn primary', type: 'button', on: { click: () => addHub(url) } }, 'Connect to this hub')))
+  } catch { $('#search-out').replaceChildren(el('div', { class: 'notice bad' }, `No hub answers at ${url}.`)) }
+})
+$('#search').addEventListener('input', (e) => { if (!/[.:]/.test(e.target.value)) { query = e.target.value.trim(); render() } })
+
+// ---------- sheets and tabs ----------
 function show (id) { document.querySelectorAll('.sheet').forEach((s) => { s.hidden = s.id !== id }); $('#home').hidden = !!id }
 document.addEventListener('click', (e) => { if (e.target.closest('[data-close]')) show(null) })
-$('#open-wallet').onclick = () => show('wallet')
 $('#open-user').onclick = () => show('user')
-$('#reload').onclick = async () => { if (!demo) await api('/api/refresh', {}).catch(() => {}); load() }
+$('#reload').onclick = async () => { if (current() && current().url !== EXAMPLE_WALLET) await walletApi('/api/refresh', {}).catch(() => {}); refresh() }
 document.querySelectorAll('[data-tab]').forEach((b) => b.addEventListener('click', () => {
   document.querySelectorAll('[data-tab]').forEach((x) => x.setAttribute('aria-selected', String(x === b)))
   for (const t of ['moves', 'address', 'keys']) $('#tab-' + t).hidden = t !== b.dataset.tab
 }))
 $('#copy-address').onclick = async () => { try { await navigator.clipboard.writeText($('#address').textContent); $('#copy-address').textContent = 'Copied' } catch { getSelection().selectAllChildren($('#address')) } }
 $('#make-invoice').onclick = async () => {
-  if (demo) { $('#invoice').textContent = 'rgb:example-invoice (connect the wallet to create a real one)'; return }
-  try { const r = await api('/api/receive', { amount: 1 }); $('#invoice').textContent = r.invoice } catch (e) { $('#invoice').textContent = e.message }
+  try { const r = await walletApi('/api/receive', { amount: 1 }); $('#invoice').textContent = r.invoice } catch (e) { $('#invoice').textContent = e.message }
 }
 
-// ---------- device sheet: details → pay → follow ----------
+// ---------- device: details → pay with the active wallet → follow ----------
 let hours = 1
-function openDevice (h, s) {
-  hours = 1
-  $('#dev-title').textContent = s.name
-  $('#track').hidden = true
-  renderDevice(h, s)
-  show('device')
-}
+function openDevice (h, s) { hours = 1; $('#dev-title').textContent = s.name; $('#track').hidden = true; renderDevice(h, s); show('device') }
 function renderDevice (h, s) {
   const [label, cls] = stateOf(s)
   const amount = s.type === 'rent' ? s.price * hours : s.price
-  const canPay = !busy && (s.type !== 'access' || !!keyFor(h)) && !['running', 'rented'].includes(s.device?.state)
-  const action = s.type === 'access' ? 'Open with my key' : `Pay ${money(amount)} ${DOLLAR}`
+  const w = current()
+  const canPay = !busy && !!w && !['running', 'rented'].includes(s.device?.state) && s.type !== 'access'
   $('#dev-body').replaceChildren(
     el('div', { class: 'row' }, el('span', { style: 'font-size:40px', 'aria-hidden': 'true' }, s.icon || '🧩'),
       el('div', { class: 'grow' }, el('strong', {}, s.name), el('div', { class: 'small muted' }, `${KIND[s.type]} · ${h.name}`)),
@@ -183,97 +260,53 @@ function renderDevice (h, s) {
     el('p', { class: 'muted small' }, priceText(s)),
     s.type === 'rent' ? el('div', { class: 'hours', role: 'group', 'aria-label': 'Hours' },
       ...Array.from({ length: s.maxHours || 4 }, (_, i) => el('button', { type: 'button', 'aria-pressed': String(hours === i + 1), on: { click: () => { hours = i + 1; renderDevice(h, s) } } }, `${i + 1} h`))) : null,
-    s.type !== 'access' ? el('div', { class: 'total' }, el('span', {}, 'Total'), el('span', {}, `${money(amount)} ${DOLLAR}`)) : null,
-    s.type === 'access' && !keyFor(h) ? el('p', { class: 'small muted' }, `You need a stay key issued by ${h.name} to open this door.`) : null,
-    el('p', { class: 'small muted mono' }, `Hub: ${demo ? 'example' : h.url}`),
-    el('button', { class: 'btn primary block', type: 'button', disabled: !canPay, on: { click: () => pay(h, s) } }, action))
+    el('div', { class: 'total' }, el('span', {}, 'Total'), el('span', {}, `${money(amount)} ${DOLLAR}`)),
+    el('p', { class: 'small muted' }, w ? `Paid from: ${w.label}` : 'Connect a wallet to pay.'),
+    el('p', { class: 'small muted mono' }, `Hub: ${demoHubs ? 'example' : h.url}`),
+    w ? el('button', { class: 'btn primary block', type: 'button', disabled: !canPay, on: { click: () => pay(h, s) } }, `Pay ${money(amount)} ${DOLLAR}`)
+      : el('button', { class: 'btn primary block', type: 'button', on: { click: () => show('connect') } }, 'Connect a wallet'))
 }
-
 const STEPS = ['Invoice from the hub', 'Paid from your wallet', 'Waiting for Bitcoin confirmation', 'Done']
 function track (step, msg, cls, link) {
   $('#track').hidden = false
   $('#track-steps').replaceChildren(...STEPS.map((t, i) => el('li', { class: i < step ? 'done' : i === step ? 'on' : '' }, t)))
   $('#track-msg').replaceChildren(msg ? el('div', { class: `notice ${cls || ''}` }, msg) : '')
-  if (link && /^https:\/\//.test(link)) $('#track-link').replaceChildren(el('a', { href: link, target: '_blank', rel: 'noopener', class: 'small' }, 'See the transaction on the explorer'))
+  $('#track-link').replaceChildren(link && /^https:\/\//.test(link) ? el('a', { href: link, target: '_blank', rel: 'noopener', class: 'small' }, 'See the transaction on the explorer') : '')
 }
-
 async function pay (h, s) {
   busy = true; renderDevice(h, s)
-  let done = false
   try {
-    if (demo) { // example mode: show the steps without touching any wallet
-      for (let i = 0; i <= 3; i++) { track(i, i === 3 ? '' : 'Example data: nothing is really paid.'); await new Promise((r) => setTimeout(r, 900)) }
-      track(4, s.type === 'access' ? 'The door is open.' : `${s.name} is yours.`, 'ok')
-      done = true
-      return done
+    if (demoHubs || current().url === EXAMPLE_WALLET) { // example mode: show the steps, move nothing
+      for (let i = 0; i <= 3; i++) { track(i, 'Example data: nothing is really paid.'); await new Promise((r) => setTimeout(r, 900)) }
+      track(4, `${s.name} started.`, 'ok'); return
     }
-    // A key goes only to the hub that issued it: the key's name starts with that hub's name.
-    const key = s.type === 'access' ? keyFor(h) : null
-    if (s.type === 'access' && !key) throw new Error(`None of your keys was issued by ${h.name}. Nothing was sent.`)
-    const body = s.type === 'access' ? { stayAssetId: key.assetId } : s.type === 'rent' ? { hours } : {}
+    const body = s.type === 'rent' ? { hours } : {}
     track(0, 'Asking the hub for an invoice…')
     const order = await api(`${h.url}/api/services/${encodeURIComponent(s.id)}/order`, body)
-    // Pay only what the screen showed: the right asset and the right amount.
-    const expected = s.type === 'access' ? { assetId: body.stayAssetId, amount: 1 } : { assetId: dollar()?.assetId, amount: s.price * (s.type === 'rent' ? hours : 1) }
+    // Pay only what the screen showed: the dollar this wallet holds, and the shown amount.
+    const expected = { assetId: dollar()?.assetId, amount: s.price * (s.type === 'rent' ? hours : 1) }
     if (!expected.assetId || order.assetId !== expected.assetId || order.amount !== expected.amount) throw new Error('The hub asked for a different amount or asset than shown. Nothing was paid.')
-    track(1, s.type === 'access' ? 'Handing your key to the door…' : `Paying ${money(order.amount)} ${DOLLAR}…`)
-    const paid = await api('/api/pay', { invoice: order.invoice, assetId: order.assetId, amount: order.amount })
+    track(1, `Paying ${money(order.amount)} ${DOLLAR}…`)
+    const paid = await walletApi('/api/pay', { invoice: order.invoice, assetId: order.assetId, amount: order.amount })
     track(2, 'Sent. The hub checks it on Bitcoin: about a minute.', '', paid.link)
     for (let i = 0; i < 60; i++) {
       await new Promise((r) => setTimeout(r, 4000))
-      if (i % 3 === 0) api('/api/refresh', {}).catch(() => {})
+      if (i % 3 === 0) walletApi('/api/refresh', {}).catch(() => {})
       const o = await api(`${h.url}/api/orders/${encodeURIComponent(order.id)}`)
-      if (o.status === 'paid') { done = true; track(4, s.type === 'access' ? 'The door is open. Welcome!' : s.type === 'rent' ? `${s.name} is yours for ${hours} h.` : `${s.name} started.`, 'ok', paid.link); break }
-      if (['failed', 'underpaid', 'expired'].includes(o.status)) { track(2, 'The hub did not accept this payment. Nothing was activated.', 'bad', paid.link); break }
+      if (o.status === 'paid') { track(4, s.type === 'rent' ? `${s.name} is yours for ${hours} h.` : `${s.name} started.`, 'ok', paid.link); break }
+      if (['failed', 'underpaid', 'expired'].includes(o.status)) { track(2, 'The hub did not accept this payment. Nothing was started.', 'bad', paid.link); break }
     }
-  } catch (e) {
-    track(0, e.message, 'bad')
-  } finally {
+  } catch (e) { track(0, e.message, 'bad') } finally {
     busy = false
-    await load()
+    await refresh()
     const fresh = hubs.find((x) => x.url === h.url)?.services.find((x) => x.id === s.id)
     if (fresh && !$('#device').hidden) renderDevice(h, fresh)
   }
-  return done
 }
 
-// ---------- "Ask the laundry": the hub's local AI turns a sentence into a bundle ----------
-// POST <hub>/api/ai/bundle { text } → [{ serviceId, hours? }]. The AI only picks services; code computes the total.
-async function ask (text) {
-  const h = hubs[0]
-  if (!h || !text.trim()) return
-  $('#ask-out').replaceChildren(el('p', { class: 'small muted' }, 'The laundry is thinking (local AI)…'))
-  let items
-  try {
-    items = demo ? [{ serviceId: 'washer' }, { serviceId: 'dryer' }] : await api(`${h.url}/api/ai/bundle`, { text })
-  } catch (e) { $('#ask-out').replaceChildren(el('div', { class: 'notice bad' }, e.message)); return }
-  // Keep only known pay-per-use devices with a valid price, each at most once.
-  const seen = new Set()
-  const lines = (Array.isArray(items) ? items : [])
-    .map((it) => h.services.find((s) => s.id === it.serviceId && s.type === 'use' && Number.isInteger(s.price) && s.price > 0))
-    .filter((s) => s && !seen.has(s.id) && seen.add(s.id))
-  if (!lines.length) { $('#ask-out').replaceChildren(el('p', { class: 'small muted' }, 'No matching device. Try "a wash and then the dryer".')); return }
-  const total = lines.reduce((sum, s) => sum + s.price, 0)
-  $('#ask-out').replaceChildren(el('div', { class: 'card' },
-    el('span', { class: 'label' }, 'Proposed by the laundry'),
-    el('div', { class: 'list' }, ...lines.map((s) => el('div', {}, el('span', { 'aria-hidden': 'true' }, s.icon), el('span', { class: 'grow' }, s.name), el('span', { class: 'mono' }, `${money(s.price)} ${DOLLAR}`)))),
-    el('div', { class: 'total' }, el('span', {}, 'Total'), el('span', {}, `${money(total)} ${DOLLAR}`)),
-    el('button', { class: 'btn primary block', type: 'button', on: { click: () => payBundle(h, lines, total) } }, `Pay ${money(total)} ${DOLLAR}`)))
+// served by a wallet service? use it as the first wallet
+if (!wallets.length) {
+  api('/api/me').then(() => { wallets = [{ url: location.origin, label: 'HubWallet' }]; save_('wallets', wallets); refresh() }).catch(() => {})
 }
-// One device after the other: the second payment starts when the first is confirmed
-// (the guest's dollars sit on one UTXO, which is busy until the first transfer settles).
-// Never pays more than the total the guest approved: each payment is checked against what is left.
-async function payBundle (h, list, approved) {
-  let left = approved
-  for (const s of list) {
-    if (s.price > left) break
-    openDevice(h, s)
-    const ok = await pay(h, s)
-    if (!ok) break
-    left -= s.price
-  }
-}
-$('#ask-form').addEventListener('submit', (e) => { e.preventDefault(); ask($('#ask-text').value) })
-
-load()
-setInterval(() => { if (!busy && $('#device').hidden) load() }, 6000)
+refresh()
+setInterval(() => { if (!busy && $('#device').hidden) refresh() }, 8000)
