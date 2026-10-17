@@ -172,7 +172,11 @@ function proposal (cur, next, diffList, onApply) {
 
 // ---------- a device: details, edit with the AI, demo clock ----------
 let current = null
-function openDevice (d) { current = d; $('#device-title').textContent = d.name; $('#edit-text').value = ''; fill($('#edit-out'), ); renderDevice(); show('device') }
+function openDevice (d) {
+  current = d; $('#device-title').textContent = d.name; $('#edit-text').value = ''; fill($('#edit-out'), )
+  editChat = [{ role: 'ai', text: `What do you want to change on the ${d.name.toLowerCase()}? Price, rules, name…` }]; pendingEdit = []
+  drawEditChat(); renderDevice(); show('device')
+}
 function renderDevice () {
   const d = current
   fill($('#device-body'), 
@@ -190,22 +194,50 @@ function renderDevice () {
 async function setClock (v) {
   try { await call(hub().url + '/api/devices/clock', { key: hub().key, body: { hour: v === '' ? null : Number(v) } }); await refresh() } catch (e) { fill($('#edit-out'), el('div', { class: 'notice bad' }, e.message)) }
 }
+// Edit as a conversation. The hub's AI takes one request at a time (POST /api/devices/:id/edit { text }):
+// when it cannot tell what to change (e.g. "raise the price" without an amount), the page asks for the
+// missing part and sends the whole request again ("raise the price" + "3.50").
+let editChat = []; let pendingEdit = []
+function drawEditChat () {
+  fill($('#edit-chat'), ...editChat.map((m) => el('div', { class: `msg ${m.role === 'ai' ? 'ai' : 'me'}` }, el('span', { class: 'by' }, m.role === 'ai' ? 'Hub AI · local' : 'You'), m.text)))
+  $('#edit-chat').scrollTop = $('#edit-chat').scrollHeight
+}
+function followUp (text) { // what to ask when the AI did not understand
+  const t = text.toLowerCase()
+  if (/(price|prezzo|cost|expensive|cheap|caro|economic|raise|lower|alza|abbassa)/.test(t)) return 'How much? Write a price (e.g. 3.50) or a percentage (e.g. +10%).'
+  if (/(lock|blocc|night|notte|close|chiud)/.test(t)) return 'From what time? For example "after 22:00".'
+  if (/(rule|regol|remove|togli)/.test(t)) return 'Which rule? For example "remove rule 1" or "add: lock it after 22:00".'
+  return 'I did not get what to change. You can change the price ("price 2.50", "+10%"), add a rule ("lock it after 22:00", "maintenance every 50 uses") or remove one ("remove rule 1").'
+}
 $('#edit-form').addEventListener('submit', async (e) => {
   e.preventDefault()
   const text = $('#edit-text').value.trim(); if (!text) return
-  if (example()) { fill($('#edit-out'), el('div', { class: 'notice' }, 'This page is showing example data. Tap "+ Add hub" (address and owner key of your hub) to edit devices with the hub\'s AI.')); return }
-  fill($('#edit-out'), el('p', { class: 'small muted' }, 'The hub\'s AI is thinking…'))
+  $('#edit-text').value = ''
+  editChat.push({ role: 'host', text }); drawEditChat()
+  if (example()) { editChat.push({ role: 'ai', text: 'This page is showing example data. Tap "+ Add hub" (address and owner key of your hub) to edit devices with the hub\'s AI.' }); drawEditChat(); return }
+  pendingEdit.push(text)
+  const request = pendingEdit.join('. ')
+  editChat.push({ role: 'ai', text: '…' }); drawEditChat()
+  const h = hub()
   try {
-    const h = hub()
-    const r = await call(`${h.url}/api/devices/${encodeURIComponent(current.id)}/edit`, { key: h.key, body: { text } })
+    const r = await call(`${h.url}/api/devices/${encodeURIComponent(current.id)}/edit`, { key: h.key, body: { text: request, messages: editChat.slice(0, -1) } })
+    if (r.reply && !r.proposed) { editChat[editChat.length - 1] = { role: 'ai', text: r.reply }; drawEditChat(); return } // the AI asks something (future ai.js)
+    pendingEdit = []
+    editChat[editChat.length - 1] = { role: 'ai', text: (r.diff || []).length ? 'Here are the changes I propose. Apply them or tell me what to adjust.' : 'Nothing would change.' }; drawEditChat()
     fill($('#edit-out'), proposal(current, r.proposed, r.diff || [], async () => {
       try {
         const saved = await call(`${h.url}/api/devices/${encodeURIComponent(current.id)}/apply`, { key: h.key, body: { config: r.proposed } })
         await refresh(); current = hub().devices.find((x) => x.id === saved.id) || current
         fill($('#edit-out'), el('div', { class: 'notice ok' }, `Saved as version ${saved.version}.`)); renderDevice()
+        editChat.push({ role: 'ai', text: `Saved as version ${saved.version}. Anything else?` }); drawEditChat()
       } catch (err) { fill($('#edit-out'), el('div', { class: 'notice bad' }, err.message)) }
     }))
-  } catch (err) { fill($('#edit-out'), el('div', { class: 'notice bad' }, err.message)) }
+  } catch (err) {
+    // not understood: keep the request, ask for the missing part
+    editChat[editChat.length - 1] = { role: 'ai', text: /did not understand/i.test(err.message) ? followUp(request) : `Sorry: ${err.message}` }
+    if (!/did not understand/i.test(err.message)) pendingEdit = []
+    drawEditChat()
+  }
 })
 
 // ---------- add a device: guided chat with the hub's AI ----------

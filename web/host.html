@@ -94,10 +94,11 @@
     <div class="row"><button class="icon-btn" data-close type="button" aria-label="Back">‹</button><h2 class="grow" id="device-title">Device</h2></div>
     <div class="card" id="device-body"></div>
     <div class="card">
-      <span class="label">Describe changes</span>
-      <form id="edit-form" class="stack">
-        <textarea id="edit-text" class="input" rows="3" placeholder="Raise the price to 2.50 and lock it after 22:00"></textarea>
-        <button class="btn primary" type="submit">Propose changes</button>
+      <span class="label">Change it with the hub's AI</span>
+      <div class="chat"><div class="msgs" id="edit-chat" aria-live="polite"></div></div>
+      <form id="edit-form" class="row">
+        <input id="edit-text" class="input grow" placeholder="e.g. raise the price, lock it after 22:00" aria-label="Describe the change" autocomplete="off">
+        <button class="btn primary" type="submit">Send</button>
       </form>
       <p class="small muted">The hub's local AI rewrites the device's JSON. The code checks it, you see the differences, and nothing changes until you press Apply.</p>
     </div>
