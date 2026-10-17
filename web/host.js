@@ -193,7 +193,7 @@ async function setClock (v) {
 $('#edit-form').addEventListener('submit', async (e) => {
   e.preventDefault()
   const text = $('#edit-text').value.trim(); if (!text) return
-  if (example()) { fill($('#edit-out'), el('div', { class: 'notice' }, 'Connect a hub to edit devices with its AI.')); return }
+  if (example()) { fill($('#edit-out'), el('div', { class: 'notice' }, 'This page is showing example data. Tap "+ Add hub" (address and owner key of your hub) to edit devices with the hub\'s AI.')); return }
   fill($('#edit-out'), el('p', { class: 'small muted' }, 'The hub\'s AI is thinking…'))
   try {
     const h = hub()
@@ -224,7 +224,7 @@ $('#dev-chat-form').addEventListener('submit', async (e) => {
   const text = $('#dev-chat-text').value.trim(); if (!text) return
   $('#dev-chat-text').value = ''
   messages.push({ role: 'host', text }); drawChat()
-  if (example()) { messages.push({ role: 'ai', text: 'Connect a hub to add devices with its AI (this page is showing example data).' }); drawChat(); return }
+  if (example()) { messages.push({ role: 'ai', text: 'This page is showing example data. Tap "+ Add hub" (address and owner key of your hub) to add devices with the hub\'s AI.' }); drawChat(); return }
   messages.push({ role: 'ai', text: '…' }); drawChat()
   try {
     const h = hub()
