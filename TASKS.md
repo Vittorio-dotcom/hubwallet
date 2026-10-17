@@ -84,6 +84,7 @@ Tasks about stay keys and the door (3, part of 19) and the bike (5) are **droppe
 | 33 | Raspberry/ESP32 device driven by the hub | — | later |
 
 ## Notes
+- **For Alessandro (guest wallet service):** the guest app can hold several wallets (each a `guest.js` on its own port) and calls them from the page. A wallet on another port is cross-origin: `guest.js` needs CORS, but since `/api/pay` spends, allow only local origins (e.g. `http://127.0.0.1:*`, `http://localhost:*`), never `*`.
 - **For Alessandro (behaviours.js):** the AI can now also emit the trigger `use_count` (value = every N uses, e.g. "every 50 washes propose maintenance", demo step 2). Please support it next to `stock_below`/`weekday`/`overdue`/`after_hour`. Demo phrase for the AI bundle: "un lavaggio e poi l'asciugatrice" (~1 s, always washer + dryer).
 - **Mentor answers (Sat 17 Oct):** (1) QVAC on another machine of the local network counts as on-device: yes, say it clearly in the pitch. (2) Watch-only hub with every signature through WDK already counts for the WDK bonus. (3) 0-conf door unlock: being handled by Lapo + Vittorio while reworking the demo devices.
 - **For Alessandro (laundry demo):** "Ask the laundry" pays the proposed devices one after the other (the guest's HUSD sit on one UTXO, busy until the first transfer settles: ~1 min each). If you add `POST /api/bundle/order { items: [{ serviceId }] }` → one invoice for the total, the page can pay a wash + dryer with a single transfer.
