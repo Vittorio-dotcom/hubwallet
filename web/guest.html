@@ -1,0 +1,96 @@
+<!doctype html>
+<!-- HubWallet guest app (the guest's phone).
+     Served by src/guest.js (the guest's own wallet, localhost). It talks to:
+       - its own wallet API on the same origin (/api/me, /api/pay, ...)
+       - the hubs nearby (public API), listed in ?hubs=http://ip:8080,http://ip:8081
+     It never holds keys: signing happens inside the guest wallet process.
+     Without a backend it shows example data, marked "Example data". -->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>HubWallet</title>
+<link rel="stylesheet" href="app.css">
+</head>
+<body>
+<main class="app" id="home">
+  <header class="row">
+    <div class="grow">
+      <span class="label">HubWallet</span>
+      <h1>Hi, guest</h1>
+    </div>
+    <span class="demo-tag" id="demo-tag" hidden>Example data</span>
+    <button class="icon-btn" id="open-user" type="button" aria-label="Your profile">👤</button>
+  </header>
+
+  <button class="balance" id="open-wallet" type="button" aria-label="Open your wallet: movements, address, keys">
+    <span class="label" style="color:inherit;opacity:.85">Balance</span>
+    <span><span class="amount" id="amount">–</span> <span class="unit" id="unit">HUSD</span></span>
+    <span class="hint" id="balance-hint">Movements, address and keys ›</span>
+  </button>
+
+  <section aria-labelledby="near-title" style="display:flex;flex-direction:column;gap:12px">
+    <div class="row"><h2 class="grow" id="near-title">Devices nearby</h2><button class="btn" id="reload" type="button">Refresh</button></div>
+    <div class="grid" id="devices"></div>
+  </section>
+</main>
+
+<!-- Wallet: movements, address, keys -->
+<section class="sheet" id="wallet" hidden aria-labelledby="wallet-title">
+  <div class="app">
+    <div class="row"><button class="icon-btn" data-close type="button" aria-label="Back">‹</button><h2 class="grow" id="wallet-title">Your wallet</h2></div>
+    <div class="tabs" role="tablist">
+      <button role="tab" aria-selected="true" data-tab="moves" type="button">Movements</button>
+      <button role="tab" aria-selected="false" data-tab="address" type="button">Address</button>
+      <button role="tab" aria-selected="false" data-tab="keys" type="button">Keys</button>
+    </div>
+    <div id="tab-moves" class="card"><div class="list" id="moves"></div></div>
+    <div id="tab-address" class="card" hidden>
+      <span class="label">Bitcoin address (for fees)</span>
+      <span class="mono" id="address">–</span>
+      <button class="btn" id="copy-address" type="button">Copy address</button>
+      <span class="label" style="margin-top:8px">Receive a key or dollars</span>
+      <p class="small muted">Create an invoice and give it to the host: it is how your stay key reaches this wallet.</p>
+      <button class="btn primary" id="make-invoice" type="button">Create an invoice</button>
+      <span class="mono" id="invoice"></span>
+    </div>
+    <div id="tab-keys" hidden style="display:flex;flex-direction:column;gap:10px"><div id="keys"></div></div>
+  </div>
+</section>
+
+<!-- User section -->
+<section class="sheet" id="user" hidden aria-labelledby="user-title">
+  <div class="app">
+    <div class="row"><button class="icon-btn" data-close type="button" aria-label="Back">‹</button><h2 class="grow" id="user-title">Your profile</h2></div>
+    <div class="card">
+      <span class="label">Bitcoin for fees</span>
+      <span style="font-size:22px;font-weight:700" id="sats">–</span>
+      <p class="small muted">Every RGB transfer is anchored in a Bitcoin transaction: this small balance pays its fee.</p>
+    </div>
+    <div class="card">
+      <span class="label">Hubs you are connected to</span>
+      <div class="list" id="hub-list"></div>
+    </div>
+    <div class="card">
+      <span class="label">Privacy</span>
+      <p class="small">Your keys and dollars stay in this wallet. A hub only sends you an invoice and checks that the payment arrived. It never learns your name or sees your balance.</p>
+    </div>
+  </div>
+</section>
+
+<!-- Device: details and payment -->
+<section class="sheet" id="device" hidden aria-labelledby="dev-title">
+  <div class="app">
+    <div class="row"><button class="icon-btn" data-close type="button" aria-label="Back">‹</button><h2 class="grow" id="dev-title">Device</h2></div>
+    <div class="card" id="dev-body"></div>
+    <div class="card" id="track" hidden aria-live="polite">
+      <ol class="steps" id="track-steps"></ol>
+      <div id="track-msg"></div>
+      <span id="track-link"></span>
+    </div>
+  </div>
+</section>
+
+<script src="guest.js" type="module"></script>
+</body>
+</html>
