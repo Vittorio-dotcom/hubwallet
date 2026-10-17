@@ -267,8 +267,11 @@ export class Hub extends EventEmitter {
           // (failTransfers without an index would fail every open invoice).
           await this.wallet.cancel(p.batchTransferIdx).catch(() => {})
           this.setStatus(p, 'expired')
+        } else if (st === 'WaitingCounterparty') {
+          // rgb-lib also calls an invoice nobody has paid yet WaitingCounterparty: keep 'waiting',
+          // or payers (src/guest.js check) refuse a request that is still payable.
         } else {
-          this.setStatus(p, st, { txid: found.txid || p.txid }) // WaitingCounterparty / WaitingConfirmations
+          this.setStatus(p, st, { txid: found.txid || p.txid }) // WaitingConfirmations
         }
       }
 
