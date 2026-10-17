@@ -35,20 +35,20 @@
 
   <!-- Wallet passes: swipe to change wallet; the last one adds a wallet -->
   <section aria-label="Your wallets" class="section">
-    <div class="passes" id="wallets" tabindex="0" aria-roledescription="carousel"></div>
+    <div class="passes" id="wallets" tabindex="0" aria-roledescription="carousel"><div class="pass off loading" aria-busy="true"><span class="spin" aria-hidden="true"></span><span>Opening your wallet…</span></div></div>
     <div class="dots" id="dots" aria-hidden="true"></div>
   </section>
 
   <section class="section" aria-labelledby="near-title">
     <div class="section-head"><h2 id="near-title">Machines</h2><button class="btn plain small" id="reload" type="button">Refresh</button></div>
-    <div id="devices"></div>
+    <div id="devices"><div class="group"><div class="empty loading" aria-busy="true"><span class="spin" aria-hidden="true"></span><p>Looking for machines…</p></div></div></div>
   </section>
 
   <section class="section" aria-labelledby="search-title">
     <div class="section-head"><h2 id="search-title">Connect a hub</h2></div>
     <form id="search-form" class="form-row">
       <label class="search grow"><span class="sr-only">Hub name or address</span><span id="search-ico"></span>
-        <input id="search" class="field" placeholder="Name or address, e.g. 192.168.7.246:8080" autocomplete="off"></label>
+        <input id="search" class="field" placeholder="Name or address" autocomplete="off"></label>
       <button class="btn primary" type="submit">Find</button>
     </form>
     <div id="search-out" class="stack"></div>

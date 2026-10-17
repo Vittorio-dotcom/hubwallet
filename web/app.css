@@ -477,3 +477,18 @@ body::before { content: ""; position: fixed; inset: -10vmax; z-index: -1; pointe
   .btn, .icon-btn, .cell, .pass, .device-card, .tab, .topbar, .tabbar { transition: none !important }
   .press { transform: none; filter: brightness(1.06) }
 }
+
+/* ---------- guest: first load and phone layout (desktop unchanged) ---------- */
+.loading { color: var(--ink-2) }
+.pass.loading { justify-content: center; align-items: center; gap: 12px; text-align: center }
+.spin { width: 26px; height: 26px; border-radius: 50%; border: 3px solid var(--sep); border-top-color: var(--blue); animation: spin .9s linear infinite }
+@keyframes spin { to { transform: rotate(360deg) } }
+@media (prefers-reduced-motion: reduce) { .spin { animation-duration: 3s } }
+@media (max-width: 600px) {
+  #home .title-block h1 { font-size: 34px }
+  #home .pass { min-height: 176px; padding: 18px 20px }
+  #home .pass .amount { font-size: 40px }
+  #home #devices .cell { min-height: 72px }
+  #search-form .btn { flex: none }
+  .sheet-panel { max-height: 92dvh; overflow-y: auto; padding-bottom: max(20px, env(safe-area-inset-bottom)) }
+}
