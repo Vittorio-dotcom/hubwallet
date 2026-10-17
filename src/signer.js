@@ -13,13 +13,17 @@
 // Keys: bip39 mnemonic from the crypto RNG (never from the AI). The hub's public keys are derived with
 // rgb-sdk deriveKeysFromMnemonic: verified to give the same xpubs and fingerprint as WDK, so a hub
 // created by WDK can move its seed here without losing anything.
-// Signing: rgb-sdk signPsbt(mnemonic, psbt, 'signet'). It does not open an RGB stash: a second
-// stash on the hub's UTXOs would conflict with the hub's own ("one wallet, one device").
+// Signing goes through Tether WDK (mentors: a watch-only hub counts for the WDK bonus when every
+// signature goes through WDK): WalletManagerRgb(seed).getAccount().signPsbt(psbt).
+// Opening that account creates a small rgb-lib database in data/signer/wdk/<hub>/. The signer never
+// calls refresh/sync on it and never goes online, so it never competes with the hub's stash
+// ("one wallet, one device"): it only holds the keys to sign.
 import fs from 'node:fs'
 import path from 'node:path'
 import readline from 'node:readline/promises'
 import * as bip39 from 'bip39'
-import { deriveKeysFromMnemonic, signPsbt } from '@utexo/rgb-sdk'
+import WalletManagerRgb from '@utexo/wdk-wallet-rgb'
+import { deriveKeysFromMnemonic } from '@utexo/rgb-sdk'
 import { NETWORK } from './wallet.js'
 
 const ROOT = process.env.DATA_DIR || 'data'
@@ -55,6 +59,14 @@ async function store (hub, mnemonic) {
   console.log(keys)
 }
 
+// A WDK account on the hub's seed, used ONLY to sign. Offline: no refresh, no sync.
+async function wdkSigner (hub, mnemonic) {
+  const dataDir = path.join(SIGNER_DIR, 'wdk', hub)
+  fs.mkdirSync(dataDir, { recursive: true, mode: 0o700 })
+  const account = await new WalletManagerRgb(mnemonic, { ...NETWORK, dataDir }).getAccount()
+  return (psbt) => account.signPsbt(psbt)
+}
+
 async function hubFetch (hubUrl, route, body) {
   const res = await fetch(hubUrl.replace(/\/+$/, '') + '/api' + route, {
     method: body ? 'POST' : 'GET',
@@ -71,6 +83,7 @@ async function watch (hub, hubUrl) {
   if (!process.env.HUB_KEY) throw new Error('Set HUB_KEY (the hub owner key).')
   const mnemonic = readSeed(hub)
   const mine = await publicKeys(mnemonic)
+  const sign = await wdkSigner(hub, mnemonic)
 
   // Before signing anything, check that this hub really is the one whose seed we hold.
   const w = await hubFetch(hubUrl, '/wallet')
@@ -104,7 +117,7 @@ async function watch (hub, hubUrl) {
           console.log('Rejected.')
           continue
         }
-        const signedPsbt = await signPsbt(mnemonic, item.psbt, NETWORK.network)
+        const signedPsbt = await sign(item.psbt) // WDK signs here
         const done = await hubFetch(hubUrl, `/to-sign/${item.id}`, { signedPsbt })
         console.log(`Signed and broadcast${done.txid ? ': ' + done.link : '.'}`)
       }
