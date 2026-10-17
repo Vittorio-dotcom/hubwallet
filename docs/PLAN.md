@@ -44,6 +44,16 @@ Rules of the form *when X, do or propose Y*, created from the device descriptor,
 Actions the code can execute (few and safe): **propose a purchase** (goes to "To sign" on the host's phone, approval = signature) · change price · lock/unlock · keep deposit · notify the host.
 The AI writes rules, code executes them (`src/behaviours.js`), only the host authorises spending, by signing.
 
+## 2-ter. Device-to-device payments (stretch, after the core)
+- Same hub: devices share the hub wallet, so a transfer between them is internal accounting, no transaction.
+- **Different hubs** (the useful case, e.g. hub A's bike buys a charge from hub B's station): hub B creates the
+  invoice (receiving needs no signature); hub A **prepares** the payment; **host A's signer signs it**.
+- To keep it automatic, the host sets **pre-authorised limits on the signer**, not on the hub: e.g. "the bike may
+  spend up to 5 HUSD a day on charging, only towards hub B". Within the limits the signer signs on its own;
+  outside them it asks the host. Like a prepaid card with a cap.
+- Security of C is kept: a stolen hub can only *request* payments; the signer refuses anything outside the limits.
+  Cost: for automatic payments the signer must be online (host's phone or a small always-on signing device).
+
 ## 3. RGB
 | Asset | Schema | Use |
 |---|---|---|
@@ -63,5 +73,5 @@ Operations: issuance · blinded invoices (the hub never sees the guest's UTXOs) 
 ## 5. Priorities
 1. **Core, by Saturday evening:** two watch-only hubs, host signer, guest enters with the key, pays the washing machine, rents the bike. All real.
 2. **AI, by Sunday morning:** plug-and-play from descriptor, contract → rules, one assistant question.
-3. **Stretch:** label photo with vision, host reports, automatic sweeping.
+3. **Stretch:** label photo with vision, host reports, automatic sweeping, device-to-device payments between hubs with signer limits.
 Internal deadline: full demo rehearsed **Sunday 11:00**; submission 13:00.

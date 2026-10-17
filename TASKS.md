@@ -41,6 +41,7 @@ Deadline: last commit on `main` by **Sunday 18 October, 13:00**. Demo-ready targ
 | 27 | Plug-and-play: device descriptor (or label photo, stretch) → proposed service + behaviours → host confirms | Lapo | todo |
 | 28 | House documents: upload contract/rules/manual; contract → proposed behaviours; guest questions answered from the documents (RAG) | Lapo | todo |
 | 29 | Host page "To sign": pending spending (key to guest, restock, sweep) with a readable summary, approve = sign | Vittorio | todo |
+| 30 | Stretch: device-to-device payment between hub A and hub B, auto-signed by the host signer within pre-authorised limits (amount/day, allowed recipient) | Vittorio's Claude + Alessandro | later |
 | 25 | Encrypted backup of the demo wallets (WDK `createBackup`) on Saturday evening, kept outside the repo | Alessandro | todo |
 
 ## Notes
