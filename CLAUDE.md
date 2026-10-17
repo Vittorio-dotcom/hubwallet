@@ -14,6 +14,15 @@ Services can have **behaviours** ("if fewer than 3 beers, propose a restock").
 The owner describes services and behaviours in plain language; a **local AI (QVAC)**
 turns them into JSON. The AI never moves money: code executes, the owner approves spending.
 
+## Scope decided on Saturday 17 October (team)
+- **Two hubs** (hub A "Casa Rossi", hub B), each with **its own WDK wallet**. The host connects devices to each hub.
+- **The guest has their own wallet** and uses the services of both hubs with the same wallet.
+- **Devices can have a function (behaviour)** attached: rules like "if stock < 3 propose a restock", "weekend price +20%", "rental overdue → keep deposit", "notify".
+- **AI on both sides**:
+  - host: conversational onboarding ("create the hub of Casa Rossi with a door, a washing machine and a bike"), services and behaviours from plain language;
+  - guest: conversational onboarding of the guest wallet, requests like "a wash and then the bike for 2 hours" → bundle proposal.
+- ⚠️ **The AI never generates keys or seeds.** Wallets are created by code (WDK, `bip39.generateMnemonic`, crypto RNG). The AI only understands the request and proposes the setup; code executes it; the human confirms.
+
 ## Architecture
 ```
 web/ (browser pages)  ──HTTP──▶  src/hub.js   (hub server: API + WDK wallet + rules + device state)
