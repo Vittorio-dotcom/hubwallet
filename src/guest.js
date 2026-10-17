@@ -31,11 +31,13 @@ const trace = new Trace(path.join(wallet.dir, 'trace.jsonl'))
 const proofsDir = path.join(wallet.dir, 'proofs')
 
 // ---------- when to refresh ----------
-// A rgb-lib refresh syncs with the indexer and is SYNCHRONOUS: while it runs (up to ~30 s on a
-// wallet with history) this server answers nothing, not even static files. So no fixed polling:
-//   - after this wallet pays → burst: +10 s (read the receiver's ACK, broadcast), +35 s, +70 s, +120 s (the block)
-//   - a transfer still in progress (cheap local check) → fallback every 2 min
-//   - nothing in progress → no refresh (pages stay instant); POST /api/refresh still works by hand
+// rgb-lib is SYNCHRONOUS: while it works this server answers nothing, not even static files.
+// A refresh costs ~1 s; an indexer sync 10–25 s. Balance reads use the local database (src/wallet.js),
+// so the sync runs only when bitcoin may have moved (docs/PERF.md):
+//   - start-up → one sync
+//   - after this wallet pays → burst: refresh at +10 s (read the receiver's ACK, broadcast), +35 s, +70 s, +120 s (the block), then one sync
+//   - a transfer still in progress (cheap local check) → fallback refresh every 2 min
+//   - nothing in progress → nothing; POST /api/refresh (refresh + sync) still works by hand
 const FALLBACK_MS = Math.max(30_000, Number(process.env.WALLET_POLL_MS || 120_000))
 let refreshing = false
 let balanceCache = null // { at, data }: /api/me also syncs, so pages get a copy at most 30 s old
@@ -44,9 +46,15 @@ async function refreshNow () {
   refreshing = true
   try { await wallet.refresh() } finally { refreshing = false; balanceCache = null }
 }
+async function syncNow () {
+  const err = await wallet.sync()
+  if (err) console.error('sync:', err)
+  balanceCache = null
+}
 function burst (reason) {
   for (const d of [10_000, 35_000, 70_000, 120_000]) setTimeout(() => refreshNow(), d)
-  console.log(`[watch] ${reason}: refresh at +10 s, +35 s, +70 s, +120 s`)
+  setTimeout(() => syncNow(), 125_000)
+  console.log(`[watch] ${reason}: refresh at +10 s, +35 s, +70 s, +120 s, then sync`)
 }
 // listTransfers reads the local database only (no sync), so this check is instant.
 async function inProgress () {
@@ -182,7 +190,7 @@ app.post('/api/pay', wrap(async (req) => {
   return { ...r, link: r.txid ? EXPLORER + r.txid : undefined }
 }))
 
-app.post('/api/refresh', wrap(async () => { await refreshNow(); return { ok: true } })) // manual: always refreshes
+app.post('/api/refresh', wrap(async () => { await refreshNow(); await syncNow(); return { ok: true } })) // manual: refresh + sync
 app.post('/api/utxos', wrap(async (req) => { const created = await wallet.createUtxos(Number(req.body?.num || 5)); balanceCache = null; return { created } }))
 app.get('/api/transfers', wrap((req) => wallet.transfers(req.query.assetId)))
 app.get('/api/trace', wrap(() => trace.list()))
@@ -190,3 +198,4 @@ app.get('/api/trace/verify', wrap(() => trace.verify()))
 
 setInterval(async () => { if (await inProgress()) refreshNow() }, FALLBACK_MS) // only while a transfer is in progress
 app.listen(PORT, HOST, () => console.log(`Wallet ${WALLET} on http://${HOST}:${PORT}`))
+syncNow() // catch up once at start-up
