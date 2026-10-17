@@ -36,6 +36,8 @@ Deadline: last commit on `main` by **Sunday 18 October, 13:00**. Demo-ready targ
 | 21 | "Ask the home" box in the guest app: calls the hub's public `/api/ai/bundle`, shows the bundle and total, confirm → pay | Vittorio (UI) + Lapo (hub AI) | todo |
 | 22 | Host AI panel in the host app: create services/behaviours by text, see the JSON, confirm | Vittorio (UI) + Lapo | todo |
 | 23 | Device functions shown on device and host pages (behaviours list, last triggered) | Vittorio + Alessandro | todo |
+| 24 | Privacy fix: `/api/stays` stores the guest name in hub-state.json, but we claim the hub keeps no guest identity. Make the name an optional label (or drop it) | Alessandro | todo |
+| 25 | Encrypted backup of the demo wallets (WDK `createBackup`) on Saturday evening, kept outside the repo | Alessandro | todo |
 
 ## Notes
 - Hub A runs on Vittorio's PC: `http://192.168.7.246:8080` (venue network).
