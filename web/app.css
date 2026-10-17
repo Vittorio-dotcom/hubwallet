@@ -15,10 +15,11 @@
   --orange: #b33000; --orange-soft: rgba(255,149,0,.16);
   --pay: #000000; --pay-ink: #ffffff;
   --shadow: 0 1px 1px rgba(0,0,0,.03), 0 10px 30px rgba(31,38,64,.10);
-  --glass: rgba(255,255,255,.56); --glass-strong: rgba(255,255,255,.74); --glass-weak: rgba(255,255,255,.38);
-  --glass-rim: rgba(255,255,255,.75); --glass-glint: rgba(255,255,255,.9); --glass-shade: rgba(31,38,64,.08);
-  --amb-1: rgba(0,122,255,.42); --amb-2: rgba(191,90,242,.36); --amb-3: rgba(48,209,160,.30); --amb-base: #eceef5;
-  --blur: blur(22px) saturate(185%);
+  --glass: rgba(255,255,255,.26); --glass-strong: rgba(255,255,255,.5); --glass-weak: rgba(255,255,255,.14);
+  --glass-rim: rgba(255,255,255,.6); --glass-glint: rgba(255,255,255,.95); --glass-shade: rgba(31,38,64,.12);
+  --glass-edge: rgba(15,23,42,.13); --glass-outline: rgba(15,23,42,.07);
+  --amb-1: rgba(0,122,255,.55); --amb-2: rgba(191,90,242,.45); --amb-3: rgba(48,209,160,.40); --amb-4: rgba(255,149,0,.30); --amb-base: #e8ebf4;
+  --blur: blur(14px) saturate(210%) brightness(1.06);
   --r-s: 10px; --r-m: 16px; --r-l: 24px; --r-xl: 30px;
   --font: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Inter", system-ui, sans-serif;
   --font-display: -apple-system, BlinkMacSystemFont, "SF Pro Display", "Inter", system-ui, sans-serif;
@@ -38,7 +39,8 @@
     --shadow: 0 1px 1px rgba(0,0,0,.3), 0 12px 32px rgba(0,0,0,.35);
     --glass: rgba(30,30,34,.52); --glass-strong: rgba(36,36,40,.72); --glass-weak: rgba(44,44,48,.36);
     --glass-rim: rgba(255,255,255,.16); --glass-glint: rgba(255,255,255,.14); --glass-shade: rgba(0,0,0,.35);
-    --amb-1: rgba(10,132,255,.45); --amb-2: rgba(94,92,230,.38); --amb-3: rgba(48,209,88,.22); --amb-base: #050507;
+    --amb-1: rgba(10,132,255,.45); --amb-2: rgba(94,92,230,.38); --amb-3: rgba(48,209,88,.22); --amb-4: rgba(255,159,10,.12); --amb-base: #050507;
+    --glass-edge: rgba(0,0,0,.45); --glass-outline: rgba(255,255,255,.07); --blur: blur(22px) saturate(185%);
     color-scheme: dark;
   }
 }
@@ -53,7 +55,8 @@
     --shadow: 0 1px 1px rgba(0,0,0,.3), 0 12px 32px rgba(0,0,0,.35);
     --glass: rgba(30,30,34,.52); --glass-strong: rgba(36,36,40,.72); --glass-weak: rgba(44,44,48,.36);
     --glass-rim: rgba(255,255,255,.16); --glass-glint: rgba(255,255,255,.14); --glass-shade: rgba(0,0,0,.35);
-    --amb-1: rgba(10,132,255,.45); --amb-2: rgba(94,92,230,.38); --amb-3: rgba(48,209,88,.22); --amb-base: #050507;
+    --amb-1: rgba(10,132,255,.45); --amb-2: rgba(94,92,230,.38); --amb-3: rgba(48,209,88,.22); --amb-4: rgba(255,159,10,.12); --amb-base: #050507;
+    --glass-edge: rgba(0,0,0,.45); --glass-outline: rgba(255,255,255,.07); --blur: blur(22px) saturate(185%);
     color-scheme: dark;
 }
 
@@ -313,7 +316,8 @@ body::before { content: ""; position: fixed; inset: -10vmax; z-index: -1; pointe
   background:
     radial-gradient(48vmax 44vmax at 8% 12%, var(--amb-1), transparent 70%),
     radial-gradient(42vmax 42vmax at 96% 38%, var(--amb-2), transparent 70%),
-    radial-gradient(50vmax 40vmax at 40% 100%, var(--amb-3), transparent 72%) }
+    radial-gradient(50vmax 40vmax at 40% 100%, var(--amb-3), transparent 72%),
+    radial-gradient(30vmax 26vmax at 70% 62%, var(--amb-4), transparent 70%) }
 @media (prefers-reduced-motion: no-preference) {
   body::before { animation: drift 28s ease-in-out infinite alternate }
   @keyframes drift { to { transform: translate3d(3vmax, -2vmax, 0) rotate(6deg) } }
@@ -477,6 +481,21 @@ body::before { content: ""; position: fixed; inset: -10vmax; z-index: -1; pointe
   .btn, .icon-btn, .cell, .pass, .device-card, .tab, .topbar, .tabbar { transition: none !important }
   .press { transform: none; filter: brightness(1.06) }
 }
+
+/* ---------- glass edge (all themes): what makes clear glass visible on a light background ----------
+   bright top glint, a white rim, a darker inner bottom edge (thickness) and a hairline outline */
+:root { --ring: inset 0 1.5px 0 var(--glass-glint), inset 0 0 0 1px var(--glass-rim), inset 0 -2px 2px -1px var(--glass-edge), 0 0 0 .5px var(--glass-outline) }
+.group, .overview, .device-card, .confirm, .proposal, .screen-pay, .sign-banner, .pass, .seg, .field { box-shadow: var(--ring), var(--shadow) }
+.composer, .icon-btn, .suggest button, .hub-switch button { box-shadow: var(--ring), 0 4px 14px var(--glass-shade) }
+.topbar, .tabbar { box-shadow: var(--ring), 0 10px 34px var(--glass-shade) }
+.sheet-panel { box-shadow: var(--ring), 0 -10px 40px var(--glass-shade) }
+.tab-thumb, .seg-thumb { box-shadow: var(--ring), 0 3px 10px var(--glass-shade) }
+.device-card.add { box-shadow: inset 0 0 0 1.5px var(--glass-rim), 0 0 0 .5px var(--glass-outline) }
+.composer:focus-within { box-shadow: var(--ring), 0 0 0 3px var(--blue-soft) }
+/* readable text on clear glass: sheets and the pass keep a denser fill */
+.sheet-panel { background-color: rgba(255,255,255,.62) }
+:root[data-theme="dark"] .sheet-panel { background-color: var(--glass-strong) }
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) .sheet-panel { background-color: var(--glass-strong) } }
 
 /* ---------- guest: first load and phone layout (desktop unchanged) ---------- */
 .loading { color: var(--ink-2) }
