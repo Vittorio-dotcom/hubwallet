@@ -127,7 +127,8 @@ button.cell:active { background: var(--fill) }
 }
 
 /* ---------- the wallet pass ---------- */
-.passes { display: grid; grid-auto-flow: column; grid-auto-columns: 100%; gap: 14px; overflow-x: auto; scroll-snap-type: x mandatory; scrollbar-width: none; margin: 0 -20px; padding: 4px 20px 8px; scroll-padding: 0 20px }
+.passes { display: grid; grid-auto-flow: column; grid-auto-columns: 100%; gap: 14px; overflow-x: auto; scroll-snap-type: x mandatory; scrollbar-width: none; margin: -12px -20px -16px; padding: 12px 20px 28px; scroll-padding: 0 20px }
+.host-side .passes { margin: -12px -6px -16px; padding: 12px 6px 28px; scroll-padding: 0 6px }
 .passes::-webkit-scrollbar { display: none }
 .pass { scroll-snap-align: start; position: relative; min-height: 196px; padding: 20px 22px; border-radius: var(--r-l); border: 0; text-align: left; color: var(--pass-ink);
   background: radial-gradient(120% 140% at 100% 0%, var(--pass-b), var(--pass-a) 60%); box-shadow: 0 12px 32px rgba(0,0,0,.18); display: flex; flex-direction: column; justify-content: space-between; overflow: hidden }
@@ -242,6 +243,7 @@ label.field-label { font-size: 13px; color: var(--ink-2); padding: 0 4px }
 .host-grid { display: grid; gap: 28px }
 @media (min-width: 980px) { .host-grid { grid-template-columns: 300px minmax(0, 1fr); align-items: start } .host-side { position: sticky; top: 68px } }
 .host-side, .host-main { display: flex; flex-direction: column; gap: 28px; min-width: 0 }
+@media (max-width: 979px) { .host-main { order: -1 } }
 .stat { display: flex; flex-direction: column; gap: 2px }
 .stat .big { font: 600 40px/1.05 var(--font-display); letter-spacing: -.03em; font-variant-numeric: tabular-nums }
 .stat .big small { font-size: 18px; color: var(--ink-2); margin-left: 4px }

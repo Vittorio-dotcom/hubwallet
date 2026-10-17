@@ -1,6 +1,6 @@
 <!doctype html>
-<!-- HubWallet host app (the service provider's phone).
-     Wallets: the host's personal wallet(s), swipe the card (payer wallet API, src/guest.js with WALLET=provider).
+<!-- HubWallet host app (the service provider; phone or laptop).
+     Wallets: the host's personal wallet(s), swipe the pass (payer wallet API, src/guest.js with WALLET=provider).
      Hubs: added by address + owner key, kept on this device; earnings, sweep, "To sign".
      Devices: one JSON configuration per device on the hub; changes are described in plain language,
      the hub's AI proposes a new JSON, the page shows the differences, the host applies them.
@@ -9,118 +9,141 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<title>HubWallet Host</title>
+<meta name="theme-color" content="#f5f5f7" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#000000" media="(prefers-color-scheme: dark)">
+<title>HubWallet for hosts</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap">
 <link rel="stylesheet" href="app.css">
 </head>
 <body>
-<main class="app" id="home">
-  <header class="row">
-    <div class="grow">
-      <span class="label">HubWallet · Host</span>
-      <h1>Your hubs</h1>
-    </div>
-    <span class="demo-tag" id="demo-tag">Example data</span>
+<div class="host" id="home">
+  <header class="topbar">
+    <div class="brand grow"><span class="brand-mark" id="brand-mark"></span>HubWallet for hosts</div>
+    <span class="example-tag" id="demo-tag">Example data</span>
   </header>
 
-  <section aria-label="Your wallets" class="stack">
-    <div class="carousel" id="wallets" tabindex="0" aria-roledescription="carousel"></div>
-    <div class="dots" id="dots" aria-hidden="true"></div>
-  </section>
+  <div class="host-grid">
+    <aside class="host-side">
+      <section class="section" aria-label="Your wallet">
+        <div class="passes" id="wallets" tabindex="0" aria-roledescription="carousel"></div>
+        <div class="dots" id="dots" aria-hidden="true"></div>
+      </section>
+      <section class="section" aria-labelledby="hubs-title">
+        <div class="section-head"><h2 id="hubs-title">Hubs</h2></div>
+        <div class="group" id="hub-list"></div>
+      </section>
+    </aside>
 
-  <section aria-labelledby="hubs-title" class="stack">
-    <h2 id="hubs-title">Hubs</h2>
-    <div class="chips" id="hub-chips" role="tablist" aria-label="Choose a hub"></div>
-    <div id="hub-card"></div>
-  </section>
+    <main class="host-main">
+      <div class="title-block">
+        <h1 id="hub-name">Your hub</h1>
+        <p>Receives payments, never spends: every payment out waits for your signature.</p>
+      </div>
+      <div id="to-sign" class="stack"></div>
+      <div id="hub-card"></div>
 
-  <div id="to-sign"></div>
+      <section class="section" aria-labelledby="dev-title-home">
+        <div class="section-head"><h2 id="dev-title-home">Machines</h2></div>
+        <div class="devices" id="devices"></div>
+      </section>
 
-  <section aria-labelledby="dev-title-home" class="stack">
-    <div class="row"><h2 class="grow" id="dev-title-home">Your devices</h2></div>
-    <div class="grid" id="devices"></div>
-    <button class="btn block" id="add-device" type="button">+ Add device</button>
-    <button class="btn block" id="open-docs" type="button">📄 Rules from a house document</button>
-  </section>
-</main>
+      <section class="section" aria-labelledby="tools-title">
+        <div class="section-head"><h2 id="tools-title">Set up with the local AI</h2></div>
+        <div class="group">
+          <button class="cell" id="add-device" type="button"><span class="cell-icon" id="ico-add"></span>
+            <div class="grow"><div class="title">Add a machine</div><div class="sub">Describe it, or paste its descriptor</div></div><span class="chev" data-chev></span></button>
+          <button class="cell" id="open-docs" type="button"><span class="cell-icon orange" id="ico-doc"></span>
+            <div class="grow"><div class="title">Rules from a document</div><div class="sub">House rules, contract or manual: the AI proposes rules</div></div><span class="chev" data-chev></span></button>
+        </div>
+        <p class="group-note">The AI runs on the hub. Your documents and your customers' habits never leave it.</p>
+      </section>
+    </main>
+  </div>
+</div>
+
+<!-- A machine: status, rules, change it with the AI -->
+<section class="sheet" id="device" hidden role="dialog" aria-modal="true" aria-labelledby="device-title">
+  <div class="sheet-panel wide" tabindex="-1">
+    <div class="grabber"></div>
+    <div class="sheet-head"><h2 id="device-title">Machine</h2><button class="icon-btn" data-close type="button" aria-label="Close"></button></div>
+    <div id="device-body" class="stack" style="gap:20px"></div>
+    <section class="stack">
+      <div class="row"><h3 class="grow">Change it</h3><span class="ai-tag" id="ai-tag-1"></span></div>
+      <div class="chat" id="edit-chat" aria-live="polite"></div>
+      <div class="suggest" id="edit-suggest"></div>
+      <form id="edit-form" class="composer">
+        <input id="edit-text" placeholder="Price 3.50, lock it after 22:00…" aria-label="Describe the change" autocomplete="off">
+        <button class="icon-btn" type="submit" aria-label="Send" data-send></button>
+      </form>
+      <p class="footnote">Nothing changes until you press Apply. The hub checks every value.</p>
+    </section>
+    <div id="edit-out" class="stack"></div>
+    <div id="device-tools" class="stack"></div>
+    <details class="json-box"><summary>Configuration file</summary><pre class="json" id="device-json"></pre></details>
+  </div>
+</section>
+
+<!-- Add a machine: a guided chat with the hub's AI -->
+<section class="sheet" id="add-dev" hidden role="dialog" aria-modal="true" aria-labelledby="add-dev-title">
+  <div class="sheet-panel" tabindex="-1">
+    <div class="grabber"></div>
+    <div class="sheet-head"><h2 id="add-dev-title">Add a machine</h2><button class="icon-btn" data-close type="button" aria-label="Close"></button></div>
+    <span class="ai-tag" id="ai-tag-2"></span>
+    <div class="chat" id="dev-chat" aria-live="polite"></div>
+    <form id="dev-chat-form" class="composer">
+      <input id="dev-chat-text" placeholder="A dryer, 2 dollars per cycle" aria-label="Your message" autocomplete="off">
+      <button class="icon-btn" type="submit" aria-label="Send" data-send></button>
+    </form>
+    <div id="add-dev-out" class="stack"></div>
+  </div>
+</section>
+
+<!-- House documents → rules -->
+<section class="sheet" id="docs" hidden role="dialog" aria-modal="true" aria-labelledby="docs-title">
+  <div class="sheet-panel" tabindex="-1">
+    <div class="grabber"></div>
+    <div class="sheet-head"><h2 id="docs-title">Rules from a document</h2><button class="icon-btn" data-close type="button" aria-label="Close"></button></div>
+    <p class="muted">Paste your house rules, the rental contract or an appliance manual. The hub's AI proposes rules for your machines; you choose which to keep.</p>
+    <textarea id="doc-text" class="field" rows="8" placeholder="Open every day from 7:00 to 22:00. The washing machine needs maintenance every 50 washes…" aria-label="Document text"></textarea>
+    <div class="form-row">
+      <label class="btn grow" for="doc-file">Choose a text file</label>
+      <input id="doc-file" type="file" accept=".txt,.md,text/plain,text/markdown" class="sr-only">
+      <button class="btn primary grow" id="doc-read" type="button">Propose rules</button>
+    </div>
+    <div id="doc-out" class="stack"></div>
+  </div>
+</section>
 
 <!-- Connect the host's personal wallet -->
-<section class="sheet" id="add-wallet" hidden aria-labelledby="add-wallet-title">
-  <div class="app">
-    <div class="row"><button class="icon-btn" data-close type="button" aria-label="Back">‹</button><h2 class="grow" id="add-wallet-title">Connect your wallet</h2></div>
-    <form class="card" id="add-wallet-form">
-      <span class="label">HubWallet wallet (Tether WDK)</span>
-      <p class="small">Your personal wallet receives your hubs' earnings and is where you keep them. Enter the address of your wallet service (src/guest.js with WALLET=provider).</p>
-      <input id="wallet-url" class="input" value="http://127.0.0.1:8091" aria-label="Wallet service address" autocomplete="off">
+<section class="sheet" id="add-wallet" hidden role="dialog" aria-modal="true" aria-labelledby="add-wallet-title">
+  <div class="sheet-panel" tabindex="-1">
+    <div class="grabber"></div>
+    <div class="sheet-head"><h2 id="add-wallet-title">Your wallet</h2><button class="icon-btn" data-close type="button" aria-label="Close"></button></div>
+    <p class="muted">Your personal HubWallet receives the earnings of your hubs. Enter the address of your wallet service.</p>
+    <form class="stack" id="add-wallet-form">
+      <input id="wallet-url" class="field" value="http://127.0.0.1:8091" aria-label="Wallet service address" autocomplete="off">
       <button class="btn primary" type="submit">Connect</button>
       <div id="add-wallet-msg"></div>
     </form>
   </div>
 </section>
 
-<!-- House documents → rules (hub AI, nothing saved until applied) -->
-<section class="sheet" id="docs" hidden aria-labelledby="docs-title">
-  <div class="app">
-    <div class="row"><button class="icon-btn" data-close type="button" aria-label="Back">‹</button><h2 class="grow" id="docs-title">Rules from a document</h2></div>
-    <div class="card">
-      <p class="small">Paste your house rules, the rental contract or an appliance manual. The hub's local AI reads it and proposes rules for your devices. The document never leaves the hub.</p>
-      <label class="label" for="doc-file">Upload a text file</label>
-      <input id="doc-file" type="file" accept=".txt,.md,text/plain,text/markdown">
-      <label class="label" for="doc-text">Or paste the text</label>
-      <textarea id="doc-text" class="input" rows="8" placeholder="Quiet hours from 22:00. The washing machine needs maintenance every 50 washes…"></textarea>
-      <button class="btn primary" id="doc-read" type="button">Propose rules</button>
-    </div>
-    <div id="doc-out" class="stack"></div>
-  </div>
-</section>
-
 <!-- Add a hub -->
-<section class="sheet" id="add-hub" hidden aria-labelledby="add-hub-title">
-  <div class="app">
-    <div class="row"><button class="icon-btn" data-close type="button" aria-label="Back">‹</button><h2 class="grow" id="add-hub-title">Add a hub</h2></div>
-    <form class="card" id="add-hub-form">
-      <label class="label" for="hub-url">Hub address</label>
-      <input id="hub-url" class="input" placeholder="192.168.7.246:8080" autocomplete="off" required>
-      <label class="label" for="hub-key">Owner key</label>
-      <input id="hub-key" class="input" placeholder="from data/&lt;hub&gt;/owner-key.txt" autocomplete="off" required>
-      <p class="small muted">The owner key stays on this device. It lets this app read the hub's earnings and manage its devices. It cannot spend: spending is signed by your signer.</p>
+<section class="sheet" id="add-hub" hidden role="dialog" aria-modal="true" aria-labelledby="add-hub-title">
+  <div class="sheet-panel" tabindex="-1">
+    <div class="grabber"></div>
+    <div class="sheet-head"><h2 id="add-hub-title">Add a hub</h2><button class="icon-btn" data-close type="button" aria-label="Close"></button></div>
+    <form class="stack" id="add-hub-form">
+      <label class="field-label" for="hub-url">Address</label>
+      <input id="hub-url" class="field" placeholder="192.168.7.246:8080" autocomplete="off" required>
+      <label class="field-label" for="hub-key">Owner key</label>
+      <input id="hub-key" class="field" placeholder="From data/&lt;hub&gt;/owner-key.txt" autocomplete="off" required>
+      <p class="footnote">The owner key stays on this device. It lets this app see earnings and manage machines. It cannot spend: payments out are signed on your phone.</p>
       <button class="btn primary" type="submit">Add hub</button>
       <div id="add-hub-msg"></div>
     </form>
-  </div>
-</section>
-
-<!-- Add a device: a guided chat with the hub's AI -->
-<section class="sheet" id="add-dev" hidden aria-labelledby="add-dev-title">
-  <div class="app">
-    <div class="row"><button class="icon-btn" data-close type="button" aria-label="Back">‹</button><h2 class="grow" id="add-dev-title">Add a device</h2></div>
-    <div class="card chat">
-      <div class="msgs" id="dev-chat" aria-live="polite"></div>
-      <form id="dev-chat-form" class="row">
-        <input id="dev-chat-text" class="input grow" placeholder="Describe the device you want to add" aria-label="Your message" autocomplete="off">
-        <button class="btn primary" type="submit">Send</button>
-      </form>
-      <p class="small muted">The hub's local AI asks what it needs and proposes a configuration. Nothing is saved until you apply it.</p>
-    </div>
-    <div id="add-dev-out" class="stack"></div>
-  </div>
-</section>
-
-<!-- A device: configuration, changes with the AI -->
-<section class="sheet" id="device" hidden aria-labelledby="device-title">
-  <div class="app">
-    <div class="row"><button class="icon-btn" data-close type="button" aria-label="Back">‹</button><h2 class="grow" id="device-title">Device</h2></div>
-    <div class="card" id="device-body"></div>
-    <div class="card">
-      <span class="label">Change it with the hub's AI</span>
-      <div class="chat"><div class="msgs" id="edit-chat" aria-live="polite"></div></div>
-      <form id="edit-form" class="row">
-        <input id="edit-text" class="input grow" placeholder="e.g. raise the price, lock it after 22:00" aria-label="Describe the change" autocomplete="off">
-        <button class="btn primary" type="submit">Send</button>
-      </form>
-      <p class="small muted">The hub's local AI rewrites the device's JSON. The code checks it, you see the differences, and nothing changes until you press Apply.</p>
-    </div>
-    <div id="edit-out" class="stack"></div>
-    <details class="card"><summary class="label">Configuration (JSON)</summary><pre class="mono json" id="device-json"></pre></details>
   </div>
 </section>
 
