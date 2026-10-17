@@ -75,8 +75,20 @@ function track (title, step, msg, cls, link) {
   $('#tracking').hidden = false
   $('#track-title').textContent = title
   $('#track-steps').innerHTML = STEPS.map((s, i) => `<li class="${i < step ? 'done' : i === step ? 'on' : ''}">${s}</li>`).join('')
-  $('#track-msg').innerHTML = msg ? `<div class="notice ${cls || ''}">${msg}</div>` : ''
-  if (link) $('#track-link').innerHTML = `<a href="${link}" target="_blank" rel="noopener" class="small">See on the explorer</a>`
+  const box = $('#track-msg')
+  box.replaceChildren()
+  if (msg) {
+    const div = document.createElement('div')
+    div.className = 'notice ' + (cls || '')
+    div.textContent = msg
+    box.append(div)
+  }
+  if (link && /^https:\/\//.test(link)) {
+    const a = document.createElement('a')
+    a.href = link; a.target = '_blank'; a.rel = 'noopener'; a.className = 'small'
+    a.textContent = 'See on the explorer'
+    $('#track-link').replaceChildren(a)
+  }
 }
 
 async function buy (s) {
@@ -104,7 +116,7 @@ async function buy (s) {
       if (o.status === 'failed' || o.status === 'underpaid') { track(title, 2, 'The home did not accept this payment. Nothing was activated.', 'bad', paid.link); break }
     }
   } catch (e) {
-    track(title, 0, esc(e.message), 'bad')
+    track(title, 0, e.message, 'bad')
   } finally {
     busy = false
     await load()
