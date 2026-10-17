@@ -34,7 +34,7 @@ const EXAMPLE = { name: 'Lavanderia', dollar: 'HUSD', services: [
 
 // rules in words (same vocabulary as docs/HOST-APP.md)
 const WHEN = { after_hour: (v) => `After ${v}:00`, weekday: (v) => `On ${v}`, stock_below: (v) => `Stock below ${v}`, counter_at: (v) => `Every ${v} uses`, overdue: () => 'When overdue' }
-const DO = { lock: () => 'locked', unlock: () => 'unlocked', set_price: (d) => `price ${money(d.price)}`, notify: () => 'the owner is notified', propose_purchase: (d) => `maintenance proposed${d.reason ? ' (' + d.reason + ')' : ''}`, keep_deposit: () => 'deposit kept' }
+const DO = { lock: () => 'locked', unlock: () => 'unlocked', set_price: (d) => `price ${money(d.price)}`, notify: () => 'the owner is notified', propose_purchase: (d) => d.reason && d.reason !== 'maintenance' ? `purchase proposed (${d.reason})` : 'maintenance proposed', keep_deposit: () => 'deposit kept' }
 const ruleText = (r) => `${(WHEN[r.when?.kind] || (() => r.when?.kind))(r.when?.value)}: ${(DO[r.do?.kind] || (() => r.do?.kind))(r.do || {})}`
 
 // device state from either the new device layer (state.status) or the older field (device.state)
