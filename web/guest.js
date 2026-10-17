@@ -90,12 +90,17 @@ async function refresh () {
 
 // ---------- rendering ----------
 const KIND = { access: 'Access', use: 'Pay per use', rent: 'Rental' }
+// Device state from the hub's device layer (state: { status, until }); older hubs used device: { state, until }.
+const statusOf = (s) => s.state?.status || s.device?.state || 'idle'
+const untilOf = (s) => s.state?.until || s.device?.until || 0
+const leftText = (until) => { const ms = Math.max(0, until - Date.now()); const m = Math.floor(ms / 60000); return `${m}:${String(Math.floor((ms % 60000) / 1000)).padStart(2, '0')} left` }
+const busyNow = (s) => ['running', 'rented', 'locked', 'open'].includes(statusOf(s)) && !(s.type === 'access' && statusOf(s) === 'open')
 function stateOf (s) {
-  const st = s.device?.state
+  const st = statusOf(s); const until = untilOf(s)
   if (s.type === 'access') return st === 'open' ? ['Open', 'on'] : ['Locked', 'free']
-  if (s.type === 'use') return st === 'running' ? ['Running', 'busy'] : ['Ready', 'free']
-  if (st === 'rented') return [`Rented · ${Math.max(0, Math.ceil(((s.device.until || 0) - Date.now()) / 1000))} s`, 'busy']
-  return ['Available', 'free']
+  if (st === 'running' || st === 'rented') return [`In use${until ? ' · ' + leftText(until) : ''}`, 'busy']
+  if (st === 'locked') return ['Locked now', 'busy']
+  return ['Free', 'free']
 }
 const priceText = (s) => s.type === 'access' ? 'With your key' : `${money(s.price)} ${DOLLAR} ${s.type === 'rent' ? '/ hour' : '/ use'}`
 
@@ -252,12 +257,13 @@ $('#make-invoice').onclick = async () => {
 
 // ---------- device: details → pay with the active wallet → follow ----------
 let hours = 1
-function openDevice (h, s) { hours = 1; $('#dev-title').textContent = s.name; $('#track').hidden = true; renderDevice(h, s); show('device') }
+let openDev = null
+function openDevice (h, s) { openDev = { h, s }; hours = 1; $('#dev-title').textContent = s.name; $('#track').hidden = true; renderDevice(h, s); show('device') }
 function renderDevice (h, s) {
   const [label, cls] = stateOf(s)
   const amount = s.type === 'rent' ? s.price * hours : s.price
   const w = current()
-  const canPay = !busy && !!w && !['running', 'rented'].includes(s.device?.state) && s.type !== 'access'
+  const canPay = !busy && !!w && !busyNow(s) && s.type !== 'access'
   fill($('#dev-body'), 
     el('div', { class: 'row' }, el('span', { style: 'font-size:40px', 'aria-hidden': 'true' }, s.icon || '🧩'),
       el('div', { class: 'grow' }, el('strong', {}, s.name), el('div', { class: 'small muted' }, `${KIND[s.type]} · ${h.name}`)),
@@ -266,6 +272,7 @@ function renderDevice (h, s) {
     s.type === 'rent' ? el('div', { class: 'hours', role: 'group', 'aria-label': 'Hours' },
       ...Array.from({ length: s.maxHours || 4 }, (_, i) => el('button', { type: 'button', 'aria-pressed': String(hours === i + 1), on: { click: () => { hours = i + 1; renderDevice(h, s) } } }, `${i + 1} h`))) : null,
     el('div', { class: 'total' }, el('span', {}, 'Total'), el('span', {}, `${money(amount)} ${DOLLAR}`)),
+    busyNow(s) ? el('div', { class: 'notice' }, statusOf(s) === 'locked' ? 'This device is locked right now by a rule of the owner (for example a quiet hour).' : `This device is in use. It will be free in ${leftText(untilOf(s)).replace(' left', '')}.`) : null,
     el('p', { class: 'small muted' }, w ? `Paid from: ${w.label}` : 'Connect a wallet to pay.'),
     el('p', { class: 'small muted mono' }, `Hub: ${demoHubs ? 'example' : h.url}`),
     w ? el('button', { class: 'btn primary block', type: 'button', disabled: !canPay, on: { click: () => pay(h, s) } }, `Pay ${money(amount)} ${DOLLAR}`)
@@ -347,4 +354,8 @@ if (!wallets.length) {
   api('/api/me').then(() => { wallets = [{ url: location.origin, label: 'HubWallet' }]; save_('wallets', wallets); refresh() }).catch(() => {})
 }
 refresh()
-setInterval(() => { if (!busy && $('#device').hidden) refresh() }, 20000) // the hub blocks while rgb-lib syncs: poll gently
+setInterval(() => { if (!busy && $('#device').hidden) refresh() }, 20000)
+setInterval(() => { // countdowns tick locally between refreshes
+  if ($('#device').hidden) { if (hubs.some((h) => h.services.some((s) => untilOf(s) > Date.now()))) render() }
+  else if (openDev && !busy) renderDevice(openDev.h, openDev.s)
+}, 1000) // the hub blocks while rgb-lib syncs: poll gently

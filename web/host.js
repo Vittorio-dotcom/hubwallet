@@ -87,6 +87,7 @@ async function refresh () {
 // ---------- rules in words ----------
 const WHEN = { after_hour: (v) => `after ${v}:00`, weekday: (v) => `on ${v}`, stock_below: (v) => `when stock is below ${v}`, counter_at: (v) => `every ${v} uses`, overdue: () => 'when overdue' }
 const DO = { lock: () => 'lock it', unlock: () => 'unlock it', set_price: (d) => `set the price to ${money(d.price)} ${DOLLAR}`, notify: () => 'notify me', propose_purchase: (d) => `propose a purchase${d.reason ? ' (' + d.reason + ')' : ''}`, keep_deposit: () => 'keep the deposit' }
+const left = (until) => { const ms = Math.max(0, until - Date.now()); return `${Math.floor(ms / 60000)}:${String(Math.floor((ms % 60000) / 1000)).padStart(2, '0')} left` }
 const ruleText = (r) => `${(WHEN[r.when?.kind] || (() => r.when?.kind))(r.when?.value)}: ${(DO[r.do?.kind] || (() => r.do?.kind))(r.do || {})}`
 
 // ---------- rendering ----------
@@ -135,7 +136,7 @@ function render () {
     return el('button', { class: 'tile', type: 'button', on: { click: () => openDevice(d) }, 'aria-label': d.name },
       el('span', { class: 'ic', 'aria-hidden': 'true' }, d.icon || '🧩'), el('span', { class: 'name' }, d.name),
       el('span', { class: 'price' }, `${money(d.price)} ${DOLLAR} / ${d.unit}`),
-      el('span', { class: `pill ${st === 'running' ? 'busy' : st === 'locked' ? 'on' : 'free'}` }, st === 'running' ? 'Running' : st === 'locked' ? 'Locked' : 'Ready'),
+      el('span', { class: `pill ${st === 'running' ? 'busy' : st === 'locked' ? 'on' : 'free'}` }, st === 'running' ? `In use${d.state?.until ? ' · ' + left(d.state.until) : ''}` : st === 'locked' ? 'Locked' : 'Free'),
       el('span', { class: 'where' }, `${(d.rules || []).length} rule${(d.rules || []).length === 1 ? '' : 's'} · earned ${money(d.earned || 0)}`))
   }) : [el('div', { class: 'empty', style: 'grid-column:1/-1' }, 'No devices yet. Add one below.')]))
 }
@@ -182,6 +183,7 @@ function renderDevice () {
   fill($('#device-body'), 
     el('div', { class: 'row' }, el('span', { style: 'font-size:40px', 'aria-hidden': 'true' }, d.icon || '🧩'),
       el('div', { class: 'grow' }, el('strong', {}, d.name), el('div', { class: 'small muted' }, `${money(d.price)} ${DOLLAR} / ${d.unit} · version ${d.version} · ${d.uses ?? 0} uses`))),
+    d.state?.status === 'running' ? el('div', { class: 'notice' }, `In use: free in ${left(d.state.until || 0).replace(' left', '')}.`) : d.state?.status === 'locked' ? el('div', { class: 'notice' }, 'Locked now by a rule.') : null,
     el('span', { class: 'label' }, 'Rules'),
     (d.rules || []).length ? el('ul', { class: 'rules' }, ...d.rules.map((r) => el('li', {}, ruleText(r)))) : el('p', { class: 'small muted' }, 'No rules yet.'),
     el('a', { class: 'small', href: `${example() ? '' : hub().url}/device.html?id=${encodeURIComponent(d.id)}`, target: '_blank', rel: 'noopener' }, 'Open the device screen'),
@@ -319,4 +321,5 @@ document.addEventListener('click', (e) => { if (e.target.closest('[data-close]')
 $('#wallets').addEventListener('scroll', () => { const c = $('#wallets'); const i = Math.round(c.scrollLeft / c.clientWidth); if (i !== walletIndex) { walletIndex = i; render() } }, { passive: true })
 
 refresh()
+setInterval(() => { if (hubs.some((h) => (h.devices || []).some((d) => d.state?.until > Date.now())) && $('#home').hidden === false) render() }, 1000) // countdowns tick locally
 setInterval(() => { if ($('#home').hidden === false) refresh() }, 30000) // the hub blocks while rgb-lib syncs: poll gently
