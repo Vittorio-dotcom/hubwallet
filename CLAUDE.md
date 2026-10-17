@@ -29,6 +29,8 @@ turns them into JSON. The AI never moves money: code executes, the owner approve
 - ⚠️ **The AI never generates keys or seeds.** Wallets are created by code (WDK, `bip39.generateMnemonic`, crypto RNG). The AI only understands the request and proposes the setup; code executes it; the human confirms.
 
 ## Architecture
+Full plan: `docs/PLAN.md` (wallets, AI roles, device functions, RGB, priorities).
+
 ```
 web/ (browser pages)  ──HTTP──▶  src/hub.js   (hub server: API + WDK wallet + rules + device state)
                                  src/guest.js (guest server: the guest's own WDK wallet, localhost only)

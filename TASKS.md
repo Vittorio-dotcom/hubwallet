@@ -37,6 +37,10 @@ Deadline: last commit on `main` by **Sunday 18 October, 13:00**. Demo-ready targ
 | 22 | Host AI panel in the host app: create services/behaviours by text, see the JSON, confirm | Vittorio (UI) + Lapo | todo |
 | 23 | Device functions shown on device and host pages (behaviours list, last triggered) | Vittorio + Alessandro | todo |
 | 24 | Privacy fix: `/api/stays` stores the guest name in hub-state.json, but we claim the hub keeps no guest identity. Make the name an optional label (or drop it) | Alessandro | todo |
+| 26 | Architecture C: watch-only hub wallet (xpubs + stash), `src/signer.js` host signer, spending operations wait for the host's signature | Vittorio's Claude | doing |
+| 27 | Plug-and-play: device descriptor (or label photo, stretch) → proposed service + behaviours → host confirms | Lapo | todo |
+| 28 | House documents: upload contract/rules/manual; contract → proposed behaviours; guest questions answered from the documents (RAG) | Lapo | todo |
+| 29 | Host page "To sign": pending spending (key to guest, restock, sweep) with a readable summary, approve = sign | Vittorio | todo |
 | 25 | Encrypted backup of the demo wallets (WDK `createBackup`) on Saturday evening, kept outside the repo | Alessandro | todo |
 
 ## Notes
