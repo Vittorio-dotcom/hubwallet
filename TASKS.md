@@ -7,7 +7,8 @@ Task numbers 17, 24, 25 and 26 are referenced by the plan: keep them.
 
 ## ★ Demo scope (Saturday afternoon)
 Laundry hub with washing machine + dryer (pay per use). No door/keys/bike/minibar. Order of work:
-1. real payment guest → hub → host through the hub and the local model (AI bundle) · 2. device rules · 3. second host.
+1. real payment guest → hub → host (the guest taps the device and pays; **no AI on the guest side**, decided Sat 17 Oct) · 2. device rules · 3. second host.
+The local AI is used by the **host** only: add a device (plug-and-play) and "Describe changes" on a device (docs/HOST-APP.md §3).
 Tasks about stay keys and the door (3, part of 19) and the bike (5) are **dropped for the demo**.
 
 ## Owners (only the owner edits these files)
@@ -53,7 +54,7 @@ Tasks about stay keys and the door (3, part of 19) and the bike (5) are **droppe
 | # | Task | Plan | Due | Status |
 |---|---|---|---|---|
 | 13 | QVAC server + `src/ai.js`: text → service, behaviour, bundle | 3c | — | done |
-| 14 | `/api/ai/*` routes in `hub.js` (service, behaviour: owner; bundle: public), agreed with Alessandro | 6 | Sat evening | todo |
+| 14 | `/api/ai/*` routes in `hub.js` (service, behaviour: owner; bundle: public), agreed with Alessandro | 6 | Sat evening | dropped (the AI is called by the device routes of #34: POST /api/devices, POST /api/devices/:id/edit) |
 | 15 | Plug-and-play: device descriptor → proposed service + behaviours | 3a | Sun 10:00 | done (`deviceToService`, contract in CLAUDE.md; route /api/ai/device in #14) |
 | 16 | House documents: contract → proposed behaviours; guest questions answered from the documents (RAG) | 3b | Sun 10:00 | done (`documentToBehaviours`, `answerFromDocuments`; demo docs in prompts/documents/; routes in #14) |
 | 17 | Questions to mentors: QVAC on another LAN machine counts as on-device? WDK bonus with watch-only hubs? 0-conf unlock? | 0-bis | Sat 15:00 | done (answers in Notes) |
@@ -67,7 +68,7 @@ Tasks about stay keys and the door (3, part of 19) and the bike (5) are **droppe
 | 21 | Guest app (rebuild): wallet cards (swipe, connect wallet), hub search, devices, pay → live status | 2.6 A | Sat 18:00 | done on example data; next: pay with `/api/check` + `/api/pay-request` (API_usage.md §4) |
 | 22 | Device pages: big state, countdown, device functions with `lastTriggered`, QR to the guest app | 4 | Sat evening | todo |
 | 23 | Host AI panel: create services/behaviours by text, add a device by descriptor, upload documents | 3 | Sun 10:00 | todo |
-| 27 | "Ask the home" box in the guest app (calls `/api/ai/bundle`) | 3 | Sun 10:00 | todo |
+| 27 | "Ask the home" box in the guest app (calls `/api/ai/bundle`) | 3 | Sun 10:00 | dropped (no AI on the guest side) |
 
 ### Everyone
 | # | Task | Who | Due | Status |
@@ -79,7 +80,7 @@ Tasks about stay keys and the door (3, part of 19) and the bike (5) are **droppe
 | # | Task | Who | Due | Status |
 |---|---|---|---|---|
 | 34 | Device/service layer on top of hub-core: one JSON per device in `data/<hub>/devices/` with versions, validation, routes `/api/devices` (list, add, edit → proposed + diff, apply, rollback) and public `/api/services` + `/api/services/:id/order` via `requestPayment`; `paid` → device `running` | Alessandro (or who he agrees) | Sat 18:00 | proposed |
-| 35 | AI: `editDevice(text, currentJson)` → proposed device JSON, and `deviceToService(descriptor)` in the same format (HOST-APP.md §2) | Lapo | Sat evening | proposed |
+| 35 | AI: `editDevice(text, currentJson)` → proposed device JSON, and `deviceToService(descriptor)` in the same format (HOST-APP.md §2) | Lapo | Sat evening | doing (format of HOST-APP.md §2 confirmed by Lapo) |
 
 ### Stretch (only after the Sunday 10:00 milestone)
 | # | Task | Who | Status |

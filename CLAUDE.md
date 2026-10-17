@@ -20,7 +20,7 @@ turns them into JSON. The AI never moves money: code executes, the owner approve
 - **Devices can have a function (behaviour)** attached: rules like "if stock < 3 propose a restock", "weekend price +20%", "rental overdue → keep deposit", "notify".
 - **AI only on the hub** (decided 17 Oct, later): the guest-side AI was decorative and is dropped. The hub's AI does
   host onboarding ("create the hub of Casa Rossi with a door, a washing machine and a bike"), services and
-  behaviours from plain language, spending proposals, and a **public assistant API for guests**
+  behaviours from plain language, spending proposals, and ~~a public assistant API for guests~~ **(dropped Sat 17 Oct: no AI on the guest side; the guest taps and pays)**
   (`POST /api/ai/bundle {text}` → `[{ serviceId, hours? }]`). The guest app stays simple and calls that API.
 - **One wallet per hub** (not per host): properties are not linked on-chain and a compromised hub does not expose the
   others. Later: one host seed with one account per hub; a watch-only hub that can receive but not spend, with the host
