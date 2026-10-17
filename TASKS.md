@@ -21,8 +21,8 @@ Deadline: last commit on `main` by **Sunday 18 October, 13:00**. Demo-ready targ
 | 6 | Host page: services, stays (send key), earnings, inbox to approve, activity log with explorer links | Vittorio | todo |
 | 7 | Guest page: my key, my HUSD, nearby services (via QR link), order + pay + live status | Vittorio | todo |
 | 8 | Device pages: big state (locked/open, running, rented + countdown), one per service, QR to the guest page | Vittorio | todo |
-| 9 | QVAC server running on the AI PC, reachable on the venue network | Lapo | todo |
-| 10 | `src/ai.js`: text → service JSON (3 templates), text → behaviour, text → bundle | Lapo | todo |
+| 9 | QVAC server running on the AI PC, reachable on the venue network | Lapo | doing |
+| 10 | `src/ai.js`: text → service JSON (3 templates), text → behaviour, text → bundle | Lapo | doing |
 | 11 | Hub routes `/api/ai/*` wired to ai.js | Lapo + Alessandro | todo |
 | 12 | `src/behaviours.js`: rules engine (stock below, weekday price, overdue rental, notify); spending proposals go to the owner inbox | Alessandro | todo |
 | 13 | Restock proposal approved → hub pays a supplier wallet (real transfer) | Alessandro | todo |
