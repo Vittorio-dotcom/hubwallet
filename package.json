@@ -1,0 +1,18 @@
+{
+  "name": "hubwallet",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Home hubs with their own RGB wallet: access tokens, pay-per-use and time-based rentals in dollars on Bitcoin, with a local AI.",
+  "engines": { "node": ">=22.17 <24" },
+  "scripts": {
+    "hub": "node src/hub.js",
+    "guest": "node src/guest.js"
+  },
+  "dependencies": {
+    "@utexo/rgb-lib-linux-x64": "0.3.0-beta.8",
+    "@utexo/wdk-wallet-rgb": "2.0.3",
+    "bip39": "3.1.0",
+    "express": "4.21.2"
+  }
+}

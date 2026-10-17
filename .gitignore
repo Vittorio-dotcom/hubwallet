@@ -1,0 +1,5 @@
+# Wallet data: seeds and RGB stash. Never commit.
+data/
+node_modules/
+.env
+*.log
