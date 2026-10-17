@@ -84,20 +84,26 @@ Requests take tens of seconds on a laptop: use the model only where it adds valu
 **AI server (Lapo's PC, RTX GPU):** `QVAC_URL=http://192.168.6.169:11434`, model `qwen3.5-2b`; Bearer key in env
 `QVAC_API_KEY` (shared on Telegram, never in the repo). Measured: ~1–2.5 s per answer (first one after start ~7 s).
 Serve config: `prompts/qvac.config.json` → `npx qvac serve --openai --host 0.0.0.0 --api-key-file <file>`.
-Test without the hub: `node src/ai.js service|behaviour|bundle "<text>"` (`HUB_URL=...` to use a hub's services).
+Test without the hub: `node src/ai.js service|behaviour|bundle|device "<text or descriptor JSON>"` (`HUB_URL=...` to use a hub's services).
 
 Functions (all `async`, throw `Error` with a message to show the user):
 - `textToService(text)` → `{ name, icon, type: access|use|rent, price (cents, per hour for rent; 0 for access), unit: use|hour, maxHours? }`
 - `textToBehaviour(text, services)` → `{ serviceId, trigger: { kind, value }, action: { kind, ... }, text }`
   - trigger: `stock_below` value = items left · `weekday` value = `['sat','sun']` (mon..sun) · `overdue` value = hours late · `after_hour` value = 0–23
-  - action: `propose_purchase { item, quantity?, maxAmount? (cents) }` · `change_price { percent }` (+20, -10) · `notify { message }`
+  - action (same names as `behaviours.js`): `propose_purchase { item, quantity?, maxAmount? (cents) }` · `change_price { percent }` (+20, -10) ·
+    `notify { message }` · `lock {}` · `unlock {}` · `keep_deposit { amount? (cents; absent = whole deposit) }`
+  - money guard: `maxAmount` / `amount` are kept only if that number is written in the host's text
 - `textToBundle(text, services)` → `[{ serviceId, hours? }]` (only ids from `services`, no access services, hours clamped to `maxHours`)
+- `deviceToService(descriptor)` (plug-and-play; descriptor = any JSON object or string: name, type, commands, sensors…) →
+  `{ service: <as textToService, with a suggested price>, behaviours: [{ trigger, action, text }] }` (0–3 rules, no `serviceId`:
+  the hub adds it after creating the service; no timed lock/unlock on access services)
 
 Hub routes (for `src/hub.js`):
 ```js
-import { textToService, textToBehaviour, textToBundle } from './ai.js'
+import { textToService, textToBehaviour, textToBundle, deviceToService } from './ai.js'
 app.post('/api/ai/service', owner, wrap(async (req, res) => res.json(await textToService(req.body?.text))))
 app.post('/api/ai/behaviour', owner, wrap(async (req, res) => res.json(await textToBehaviour(req.body?.text, state.services))))
+app.post('/api/ai/device', owner, wrap(async (req, res) => res.json(await deviceToService(req.body?.descriptor))))
 app.post('/api/ai/bundle', wrap(async (req, res) => res.json(await textToBundle(req.body?.text, state.services))))
 ```
 The routes only return a proposal; the page shows it and the human confirms (e.g. `POST /api/services` with the JSON).

@@ -5,6 +5,7 @@
 //   QVAC_URL=http://<ai-pc>:11434 QVAC_API_KEY=... node src/ai.js service "e-bike, 3 dollars an hour, max 4 hours"
 //   node src/ai.js behaviour "if fewer than 3 beers, propose a restock"   (services from HUB_URL or a demo list)
 //   node src/ai.js bundle "a wash and then the bike for 2 hours"
+//   node src/ai.js device '{"name":"Bosch WAN28","type":"washing_machine","commands":["start","lock","unlock"]}'
 import fs from 'node:fs'
 import { fileURLToPath } from 'node:url'
 
@@ -14,11 +15,11 @@ const QVAC_MODEL = process.env.QVAC_MODEL || 'qwen3.5-2b'
 const QVAC_TIMEOUT_MS = Number(process.env.QVAC_TIMEOUT_MS || 90_000)
 
 const prompt = (name) => fs.readFileSync(new URL(`../prompts/${name}.md`, import.meta.url), 'utf8')
-const PROMPTS = { service: prompt('service'), behaviour: prompt('behaviour'), bundle: prompt('bundle') }
+const PROMPTS = { service: prompt('service'), behaviour: prompt('behaviour'), bundle: prompt('bundle'), device: prompt('device') }
 
 // One call to the model: system prompt + user text, answer forced to match `schema`.
-async function ask (system, text, name, schema) {
-  text = String(text || '').trim().slice(0, 500)
+async function ask (system, text, name, schema, maxChars = 500) {
+  text = String(text || '').trim().slice(0, maxChars)
   if (!text) throw new Error('Write a sentence first.')
   let res
   try {
@@ -181,6 +182,43 @@ function buildBehaviour (out, text) {
   return { trigger: { kind: out.triggerKind, value }, action, text: str(text, 200) }
 }
 
+// ---------- device descriptor → service + behaviours (plug-and-play) ----------
+// A new device introduces itself with a descriptor (in the product from Matter / Home Assistant; in the demo
+// pasted by the host). The model proposes the service, a suggested price and up to 3 rules; the host confirms.
+// → { service: { name, icon, type, price, unit, maxHours? }, behaviours: [{ trigger, action, text }] }
+//   behaviours have no serviceId yet: the hub adds it when it creates the service.
+export async function deviceToService (descriptor) {
+  const json = typeof descriptor === 'string' ? descriptor : JSON.stringify(descriptor)
+  if (!json || json === '{}' || json === 'null') throw new Error('Paste the device descriptor first.')
+  const out = await ask(PROMPTS.device, json, 'device', {
+    type: 'object',
+    properties: {
+      ...SERVICE_FIELDS,
+      behaviours: {
+        type: 'array',
+        maxItems: 3,
+        items: {
+          type: 'object',
+          properties: { description: { type: 'string' }, ...BEHAVIOUR_FIELDS },
+          required: ['description', ...Object.keys(BEHAVIOUR_FIELDS)],
+          additionalProperties: false
+        }
+      }
+    },
+    required: [...Object.keys(SERVICE_FIELDS), 'behaviours'],
+    additionalProperties: false
+  }, 2000)
+  const behaviours = []
+  for (const b of out.behaviours || []) {
+    // A suggested rule that does not hold together is dropped, not shown: the host can always add rules by text.
+    try { behaviours.push(buildBehaviour(b, str(b.description, 200) || '')) } catch {}
+  }
+  const service = buildService(out)
+  // Safety: a door is opened by the guest's key; a timed lock/unlock rule could lock a guest out at night.
+  const safe = service.type === 'access' ? behaviours.filter((x) => !['lock', 'unlock'].includes(x.action.kind)) : behaviours
+  return { service, behaviours: safe }
+}
+
 // ---------- text → bundle ----------
 // → [{ serviceId, hours? }]  (hours only for rent, clamped to the service's maxHours)
 export async function textToBundle (text, services) {
@@ -224,8 +262,8 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
   const services = process.env.HUB_URL
     ? (await (await fetch(`${process.env.HUB_URL.replace(/\/+$/, '')}/api/services`)).json()).services
     : demo
-  const fn = { service: () => textToService(text), behaviour: () => textToBehaviour(text, services), bundle: () => textToBundle(text, services) }[cmd]
-  if (!fn) { console.error('usage: node src/ai.js service|behaviour|bundle <text>'); process.exit(1) }
+  const fn = { service: () => textToService(text), behaviour: () => textToBehaviour(text, services), bundle: () => textToBundle(text, services), device: () => deviceToService(text) }[cmd]
+  if (!fn) { console.error('usage: node src/ai.js service|behaviour|bundle|device <text or descriptor JSON>'); process.exit(1) }
   const t = Date.now()
   try {
     console.log(JSON.stringify(await fn(), null, 2))
