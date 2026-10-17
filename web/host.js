@@ -319,4 +319,4 @@ document.addEventListener('click', (e) => { if (e.target.closest('[data-close]')
 $('#wallets').addEventListener('scroll', () => { const c = $('#wallets'); const i = Math.round(c.scrollLeft / c.clientWidth); if (i !== walletIndex) { walletIndex = i; render() } }, { passive: true })
 
 refresh()
-setInterval(() => { if ($('#home').hidden === false) refresh() }, 10000)
+setInterval(() => { if ($('#home').hidden === false) refresh() }, 30000) // the hub blocks while rgb-lib syncs: poll gently

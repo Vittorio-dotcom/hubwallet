@@ -347,4 +347,4 @@ if (!wallets.length) {
   api('/api/me').then(() => { wallets = [{ url: location.origin, label: 'HubWallet' }]; save_('wallets', wallets); refresh() }).catch(() => {})
 }
 refresh()
-setInterval(() => { if (!busy && $('#device').hidden) refresh() }, 8000)
+setInterval(() => { if (!busy && $('#device').hidden) refresh() }, 20000) // the hub blocks while rgb-lib syncs: poll gently
