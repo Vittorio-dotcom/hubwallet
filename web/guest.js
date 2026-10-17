@@ -37,7 +37,7 @@ function render () {
     ? keys.map((k) => `<div class="key"><span class="label">Your key</span><h2>${esc(k.name)}</h2><span class="mono">${esc(k.ticker)} · RGB asset</span></div>`).join('')
     : '<div class="empty">No key yet. The host sends it to your wallet when your stay is confirmed.</div>'
 
-  const list = [...hubInfo.services].sort((a, b) => (b.id === FOCUS) - (a.id === FOCUS))
+  const list = hubInfo.services.filter((x) => ['access', 'use', 'rent'].includes(x.type)).sort((a, b) => (b.id === FOCUS) - (a.id === FOCUS))
   $('#services').innerHTML = list.length ? list.map(serviceCard).join('') : '<div class="empty">This home has no services yet.</div>'
 }
 
@@ -100,6 +100,11 @@ async function buy (s) {
     if (s.type === 'rent') body = { hours: Number($(`#h-${s.id}`).value) }
     track(title, 0, 'Asking the home for an invoice…')
     const order = await hub(`/api/services/${s.id}/order`, body)
+    // Pay only what the button showed: the right asset and the right amount.
+    const expected = s.type === 'access' ? { assetId, amount: 1 } : { assetId: dollarAsset()?.assetId, amount: s.price * (body.hours || 1) }
+    if (!expected.assetId || order.assetId !== expected.assetId || order.amount !== expected.amount) {
+      throw new Error('The home asked for a different amount or asset than shown. Nothing was paid.')
+    }
     assetId = order.assetId
     track(title, 1, s.type === 'access' ? 'Handing your key to the door…' : `Paying ${money(order.amount)} ${hubInfo.dollar}…`)
     const paid = await api('/api/pay', { invoice: order.invoice, assetId, amount: order.amount })
