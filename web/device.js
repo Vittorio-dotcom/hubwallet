@@ -7,7 +7,11 @@ const money = (cents) => (Number(cents || 0) / 100).toFixed(2)
 const qs = new URLSearchParams(location.search)
 const ID = qs.get('id')
 const HUB = location.origin
-const GUEST = qs.get('guest') || 'http://127.0.0.1:8090/guest.html'
+// Guest app URL for the QR: only an http(s) URL is accepted (no javascript: or other schemes), else the default.
+const GUEST = (() => {
+  const fallback = 'http://127.0.0.1:8090/guest.html'
+  try { const u = new URL(qs.get('guest') || fallback); return /^https?:$/.test(u.protocol) ? u.origin + u.pathname : fallback } catch { return fallback }
+})()
 
 function el (tag, props = {}, ...children) {
   const n = document.createElement(tag)
@@ -86,7 +90,8 @@ function render () {
 
 function drawQr () {
   const box = document.getElementById('qr'); if (!box) return
-  const url = `${GUEST}?hubs=${encodeURIComponent(HUB)}`
+  const u = new URL(GUEST); u.searchParams.set('hubs', HUB)
+  const url = u.toString()
   if (window.QRCode) { box.replaceChildren(); new window.QRCode(box, { text: url, width: 148, height: 148, correctLevel: window.QRCode.CorrectLevel.M }) }
   else box.replaceChildren(el('a', { href: url, class: 'small' }, 'Open HubWallet'))
   qrDone = true
