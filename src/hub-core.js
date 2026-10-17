@@ -373,6 +373,7 @@ export class Hub extends EventEmitter {
     if (!signedPsbt) throw new Error('signedPsbt is required.')
     try {
       const r = await this.wallet.finish(item.kind, signedPsbt)
+      this.walletCache = null
       this.setSignStatus(item, 'signed', { txid: r.txid, created: r.created, signedAt: Date.now() })
       // A send waits for the receiver's ACK before rgb-lib broadcasts it, then for the block.
       this.burst(`${item.kind} ${item.id} signed`)
@@ -405,6 +406,7 @@ export class Hub extends EventEmitter {
     amount = checkAmount(amount)
     precision = Math.min(Math.max(0, Math.round(Number(precision) || 0)), 8)
     const a = await this.wallet.issue({ ticker, name, amount, precision })
+    this.walletCache = null // the wallet changed: next GET /api/wallet reads it again
     this.trace.append('asset.issued', a.assetId, { ticker, name, amount, precision, description: checkText(description) })
     return a
   }

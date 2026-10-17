@@ -139,6 +139,7 @@ app.post('/api/pay-request', wrap(async (req) => {
   if (!expect) throw new Error('expect { assetId, amount } is required: pass what the user confirmed.')
   const c = await check(hubUrl, paymentId, expect)
   const sent = await wallet.send({ assetId: c.assetId, amount: c.amount, invoice: c.invoice }) // WDK signs here
+  balanceCache = null // the wallet changed: next /api/me reads it again
   let payerTag = null
   let claimError
   if (!anonymous) {
@@ -175,13 +176,14 @@ app.post('/api/pay', wrap(async (req) => {
   const inv = await wallet.decodeInvoice(invoice)
   if (inv.assetId && inv.assetId !== assetId) throw new Error('The invoice asks for a different asset.')
   const r = await wallet.send({ invoice, assetId, amount: Number(amount) })
+  balanceCache = null
   trace.append('pay.sent', inv.recipientId, { assetId, amount: Number(amount), txid: r.txid, description: String(description).slice(0, 200) })
   burst(`paid ${inv.recipientId}`)
   return { ...r, link: r.txid ? EXPLORER + r.txid : undefined }
 }))
 
 app.post('/api/refresh', wrap(async () => { await refreshNow(); return { ok: true } })) // manual: always refreshes
-app.post('/api/utxos', wrap(async (req) => ({ created: await wallet.createUtxos(Number(req.body?.num || 5)) })))
+app.post('/api/utxos', wrap(async (req) => { const created = await wallet.createUtxos(Number(req.body?.num || 5)); balanceCache = null; return { created } }))
 app.get('/api/transfers', wrap((req) => wallet.transfers(req.query.assetId)))
 app.get('/api/trace', wrap(() => trace.list()))
 app.get('/api/trace/verify', wrap(() => trace.verify()))
