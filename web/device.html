@@ -1,0 +1,18 @@
+<!doctype html>
+<!-- HubWallet device screen: stands in for the physical device in the demo (washing machine, dryer).
+     Served by the hub (src/hub.js serves web/). Open /device.html?id=<serviceId>; without id it lists the devices.
+     It only READS the public hub API (/api/hub/info, /api/services): it cannot start or pay anything.
+     Optional: &guest=<guest app URL> for the QR code (default http://127.0.0.1:8090/guest.html). -->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>HubWallet Device</title>
+<link rel="stylesheet" href="app.css">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
+</head>
+<body class="device-body">
+<main class="app" id="screen" aria-live="polite"></main>
+<script src="device.js" type="module"></script>
+</body>
+</html>
