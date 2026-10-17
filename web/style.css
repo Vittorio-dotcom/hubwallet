@@ -1,0 +1,59 @@
+/* HubWallet — shared look for guest, host and device pages */
+:root {
+  --bg: #eef2f1; --surface: #ffffff; --surface-2: #f5f8f7; --line: #d5dedc;
+  --ink: #16201e; --muted: #5b6a67;
+  --accent: #2b4fd6; --accent-ink: #ffffff; --accent-soft: #e3e9fd;
+  --btc: #c96a12; --btc-soft: #fbeedd;
+  --ok: #1d7a4c; --ok-soft: #dcf1e6; --warn: #a15c00; --warn-soft: #fdf0d8; --bad: #b3261e; --bad-soft: #fbe3e1;
+  --font: "IBM Plex Sans", "Segoe UI", system-ui, sans-serif;
+  --mono: "IBM Plex Mono", ui-monospace, Menlo, monospace;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #0f1514; --surface: #18201f; --surface-2: #1e2827; --line: #2e3b39;
+    --ink: #e6eeec; --muted: #9aaba7;
+    --accent: #7d97ff; --accent-ink: #0c1230; --accent-soft: #232e55;
+    --btc: #f0a04b; --btc-soft: #3a2a17;
+    --ok: #5fd39a; --ok-soft: #173528; --warn: #f2b555; --warn-soft: #3a2c13; --bad: #ff8a80; --bad-soft: #3d1c1a;
+    color-scheme: dark;
+  }
+}
+* { box-sizing: border-box }
+body { margin: 0; background: var(--bg); color: var(--ink); font: 15px/1.5 var(--font); padding: 16px }
+.wrap { max-width: 560px; margin: 0 auto; display: flex; flex-direction: column; gap: 14px }
+.wide { max-width: 1100px }
+h1, h2, h3 { margin: 0; line-height: 1.2 }
+h1 { font-size: 24px } h2 { font-size: 17px } h3 { font-size: 15px }
+p { margin: 0 }
+.muted { color: var(--muted) }
+.small { font-size: 13px }
+.mono { font-family: var(--mono); font-size: 12.5px; overflow-wrap: anywhere }
+.label { font-size: 11.5px; letter-spacing: .07em; text-transform: uppercase; color: var(--muted); font-weight: 600 }
+.card { background: var(--surface); border: 1px solid var(--line); border-radius: 12px; padding: 14px; display: flex; flex-direction: column; gap: 10px }
+.row { display: flex; flex-wrap: wrap; gap: 8px; align-items: center }
+.grow { flex: 1; min-width: 0 }
+.stats { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px }
+.stat { background: var(--surface-2); border: 1px solid var(--line); border-radius: 10px; padding: 10px }
+.stat .v { font-family: var(--mono); font-size: 20px; font-variant-numeric: tabular-nums }
+.key { border: 1.5px solid var(--btc); background: var(--btc-soft); border-radius: 12px; padding: 12px }
+.svc { display: grid; grid-template-columns: 40px minmax(0, 1fr); gap: 12px; align-items: start; padding: 12px; border: 1px solid var(--line); border-radius: 10px; background: var(--surface-2) }
+.svc.focus { border-color: var(--accent); box-shadow: 0 0 0 2px var(--accent-soft) }
+.svc .ic { font-size: 24px; width: 40px; height: 40px; display: grid; place-items: center; border-radius: 10px; background: var(--surface) }
+.pill { display: inline-block; font-size: 11px; font-weight: 600; padding: 1px 8px; border-radius: 999px }
+.pill.access { background: var(--btc-soft); color: var(--btc) } .pill.use { background: var(--accent-soft); color: var(--accent) } .pill.rent { background: var(--ok-soft); color: var(--ok) }
+.pill.on { background: var(--ok-soft); color: var(--ok) } .pill.off { background: var(--surface); color: var(--muted); border: 1px solid var(--line) }
+button, select, input { font: inherit }
+button { cursor: pointer; border-radius: 9px; border: 1px solid var(--line); background: var(--surface); color: var(--ink); padding: 8px 14px; font-weight: 600 }
+button.primary { background: var(--accent); color: var(--accent-ink); border-color: var(--accent) }
+button:disabled { opacity: .45; cursor: not-allowed }
+button:focus-visible, select:focus-visible, input:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px }
+select, input { border: 1px solid var(--line); border-radius: 9px; padding: 8px 10px; background: var(--surface); color: var(--ink) }
+.steps { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 4px }
+.steps li { display: flex; gap: 8px; align-items: center; font-size: 13.5px; color: var(--muted) }
+.steps li::before { content: ""; width: 10px; height: 10px; border-radius: 50%; border: 2px solid var(--line); flex: none }
+.steps li.on { color: var(--ink) } .steps li.on::before { background: var(--btc); border-color: var(--btc) }
+.steps li.done::before { background: var(--ok); border-color: var(--ok) }
+.notice { border-radius: 10px; padding: 10px 12px; font-size: 14px }
+.notice.ok { background: var(--ok-soft); color: var(--ok) } .notice.bad { background: var(--bad-soft); color: var(--bad) } .notice.warn { background: var(--warn-soft); color: var(--warn) }
+a { color: var(--accent) }
+.empty { color: var(--muted); font-size: 14px; padding: 10px; border: 1px dashed var(--line); border-radius: 10px }
