@@ -102,3 +102,18 @@ a { color: var(--accent) }
 .dots { display: flex; justify-content: center; gap: 6px }
 .dots span { width: 7px; height: 7px; border-radius: 50%; background: var(--line) }
 .dots span.on { background: var(--accent) }
+
+/* host app */
+.chips { display: flex; flex-wrap: wrap; gap: 8px }
+.chip { border: 1px solid var(--line); background: var(--surface); border-radius: 999px; padding: 7px 14px; font-weight: 600 }
+.chip[aria-selected="true"] { background: var(--accent); color: var(--accent-ink); border-color: var(--accent) }
+.warn-card { border-color: var(--btc); background: var(--btc-soft) }
+textarea.input { resize: vertical; font-family: var(--mono); font-size: 13px }
+.json { white-space: pre-wrap; margin: 0; background: var(--surface-2); padding: 10px; border-radius: 10px }
+.rules, .diff { margin: 0; padding-left: 18px; display: flex; flex-direction: column; gap: 4px }
+.diff { list-style: none; padding: 0 }
+.diff li { font-family: var(--mono); font-size: 13px; padding: 6px 8px; border-radius: 8px }
+.diff li.add { background: var(--ok-soft); color: var(--ok) }
+.diff li.del { background: var(--bad-soft); color: var(--bad) }
+.diff li.mod { background: var(--warn-soft); color: var(--warn) }
+details summary { cursor: pointer }

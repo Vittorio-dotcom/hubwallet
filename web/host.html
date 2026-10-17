@@ -1,0 +1,95 @@
+<!doctype html>
+<!-- HubWallet host app (the service provider's phone).
+     Wallets: the host's personal wallet(s), swipe the card (payer wallet API, src/guest.js with WALLET=provider).
+     Hubs: added by address + owner key, kept on this device; earnings, sweep, "To sign".
+     Devices: one JSON configuration per device on the hub; changes are described in plain language,
+     the hub's AI proposes a new JSON, the page shows the differences, the host applies them.
+     For now it runs on example data (marked), following docs/HOST-APP.md. -->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>HubWallet Host</title>
+<link rel="stylesheet" href="app.css">
+</head>
+<body>
+<main class="app" id="home">
+  <header class="row">
+    <div class="grow">
+      <span class="label">HubWallet · Host</span>
+      <h1>Your hubs</h1>
+    </div>
+    <span class="demo-tag" id="demo-tag">Example data</span>
+  </header>
+
+  <section aria-label="Your wallets" class="stack">
+    <div class="carousel" id="wallets" tabindex="0" aria-roledescription="carousel"></div>
+    <div class="dots" id="dots" aria-hidden="true"></div>
+  </section>
+
+  <section aria-labelledby="hubs-title" class="stack">
+    <h2 id="hubs-title">Hubs</h2>
+    <div class="chips" id="hub-chips" role="tablist" aria-label="Choose a hub"></div>
+    <div id="hub-card"></div>
+  </section>
+
+  <div id="to-sign"></div>
+
+  <section aria-labelledby="dev-title-home" class="stack">
+    <div class="row"><h2 class="grow" id="dev-title-home">Your devices</h2></div>
+    <div class="grid" id="devices"></div>
+    <button class="btn block" id="add-device" type="button">+ Add device</button>
+  </section>
+</main>
+
+<!-- Add a hub -->
+<section class="sheet" id="add-hub" hidden aria-labelledby="add-hub-title">
+  <div class="app">
+    <div class="row"><button class="icon-btn" data-close type="button" aria-label="Back">‹</button><h2 class="grow" id="add-hub-title">Add a hub</h2></div>
+    <form class="card" id="add-hub-form">
+      <label class="label" for="hub-url">Hub address</label>
+      <input id="hub-url" class="input" placeholder="192.168.7.246:8080" autocomplete="off" required>
+      <label class="label" for="hub-key">Owner key</label>
+      <input id="hub-key" class="input" placeholder="from data/&lt;hub&gt;/owner-key.txt" autocomplete="off" required>
+      <p class="small muted">The owner key stays on this device. It lets this app read the hub's earnings and manage its devices. It cannot spend: spending is signed by your signer.</p>
+      <button class="btn primary" type="submit">Add hub</button>
+      <div id="add-hub-msg"></div>
+    </form>
+  </div>
+</section>
+
+<!-- Add a device (plug-and-play) -->
+<section class="sheet" id="add-dev" hidden aria-labelledby="add-dev-title">
+  <div class="app">
+    <div class="row"><button class="icon-btn" data-close type="button" aria-label="Back">‹</button><h2 class="grow" id="add-dev-title">Add a device</h2></div>
+    <div class="card">
+      <span class="label">Device descriptor</span>
+      <p class="small muted">Paste what the device says about itself, or describe it. The hub's AI proposes a configuration; nothing is saved until you apply it.</p>
+      <textarea id="descriptor" class="input" rows="5">{ "name": "Dryer", "type": "tumble dryer", "commands": ["start", "stop"], "cycle_minutes": 45 }</textarea>
+      <button class="btn primary" id="propose-device" type="button">Propose configuration</button>
+    </div>
+    <div id="add-dev-out" class="stack"></div>
+  </div>
+</section>
+
+<!-- A device: configuration, changes with the AI -->
+<section class="sheet" id="device" hidden aria-labelledby="device-title">
+  <div class="app">
+    <div class="row"><button class="icon-btn" data-close type="button" aria-label="Back">‹</button><h2 class="grow" id="device-title">Device</h2></div>
+    <div class="card" id="device-body"></div>
+    <div class="card">
+      <span class="label">Describe changes</span>
+      <form id="edit-form" class="stack">
+        <textarea id="edit-text" class="input" rows="3" placeholder="Raise the price to 2.50 and lock it after 22:00"></textarea>
+        <button class="btn primary" type="submit">Propose changes</button>
+      </form>
+      <p class="small muted">The hub's local AI rewrites the device's JSON. The code checks it, you see the differences, and nothing changes until you press Apply.</p>
+    </div>
+    <div id="edit-out" class="stack"></div>
+    <details class="card"><summary class="label">Configuration (JSON)</summary><pre class="mono json" id="device-json"></pre></details>
+  </div>
+</section>
+
+<script src="host.js" type="module"></script>
+</body>
+</html>
