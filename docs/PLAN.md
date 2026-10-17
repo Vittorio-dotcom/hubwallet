@@ -7,6 +7,15 @@ HubWallet lets anyone who offers a service **connect their devices to a physical
 
 ---
 
+## ★ Demo scope (decided Saturday afternoon — overrides the examples below)
+- **One hub: a laundry** ("Lavanderia"), with **two devices: washing machine and dryer**, both pay-per-use (template `use`).
+- **No door, no stay keys, no bike, no minibar** in the demo. Those flows stay in the plan as product examples only.
+- **Step 1 (must work):** a real payment **guest → hub → host**, through the hub and the **local model**: the guest asks
+  in plain language (e.g. "a wash and then the dryer"), the hub's AI proposes the bundle, code computes the total, the guest
+  pays from their own wallet, the hub sees it and starts the device. All real on Mutinynet.
+- **Step 2:** rules on the devices (behaviours), e.g. "after 22:00 lock the washing machine", "every 50 washes propose maintenance".
+- **Step 3:** a second host/hub.
+
 ## 0. Team split (who owns what)
 
 | Who | Area | Files (only the owner edits them) |

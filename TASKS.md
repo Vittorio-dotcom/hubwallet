@@ -5,6 +5,11 @@ Update the status when you start (`doing`) and finish (`done`). `git pull --no-r
 Commit prefixes: `hub:` `wallet:` `signer:` `web:` `ai:`. No rebase, no amend, no force-push. Never commit `data/`, seeds, keys, `.env`.
 Task numbers 17, 24, 25 and 26 are referenced by the plan: keep them.
 
+## ★ Demo scope (Saturday afternoon)
+Laundry hub with washing machine + dryer (pay per use). No door/keys/bike/minibar. Order of work:
+1. real payment guest → hub → host through the hub and the local model (AI bundle) · 2. device rules · 3. second host.
+Tasks about stay keys and the door (3, part of 19) and the bike (5) are **dropped for the demo**.
+
 ## Owners (only the owner edits these files)
 | Who | Area | Files |
 |---|---|---|
@@ -31,9 +36,9 @@ Task numbers 17, 24, 25 and 26 are referenced by the plan: keep them.
 | 26 | `wallet.js`: `Wallet` (seed, WDK) + `WatchWallet` (xpubs, rgb-sdk) with `prepareSend` / `prepareUtxos` / `finish`; `signer.js` `init` + `watch` | 1, 2.1, 2.4 | Sat 15:00 | todo |
 | 1 | `hub.js`: services (access/use/rent), orders, payment watcher, `fulfil`, device state; serves `web/` | 2.5 | Sat 15:00 | todo |
 | 2 | "To sign" queue + routes `GET /api/to-sign`, `POST /api/to-sign/:id`, `/reject`, expiry 10 min, one prepared send at a time | 2.3, 6 | Sat 15:00 | todo |
-| 3 | Flow B: stay key issued by the hub, sent after signature; door check-in session until `to` | 2.6 B | Sat 15:00 | todo |
+| 3 | Flow B: stay key issued by the hub, sent after signature; door check-in session until `to` | 2.6 B | — | dropped for the demo |
 | 4 | Flow A: pay per use (washing machine) | 2.6 A | Sat 18:00 | todo |
-| 5 | Flow C: rental (bike), lock when time is up | 2.6 C | Sat 18:00 | todo |
+| 5 | Flow C: rental (bike), lock when time is up | 2.6 C | — | dropped for the demo |
 | 6 | `guest.js` (guest, and supplier with `WALLET=supplier`) | 1 | Sat 18:00 | todo |
 | 7 | `scripts/` demo setup: signer init, funding, UTXOs via signer, HUSD, guest funds | 2.9 | Sat 18:00 | todo |
 | 8 | `behaviours.js`: `evaluate(event, state)`, triggers and actions, `effectivePrice`, `lastTriggered` | 4 | Sat evening | todo |
