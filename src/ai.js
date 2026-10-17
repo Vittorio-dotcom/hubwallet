@@ -15,10 +15,10 @@ const QVAC_MODEL = process.env.QVAC_MODEL || 'qwen3.5-2b'
 const QVAC_TIMEOUT_MS = Number(process.env.QVAC_TIMEOUT_MS || 90_000)
 
 const prompt = (name) => fs.readFileSync(new URL(`../prompts/${name}.md`, import.meta.url), 'utf8')
-const PROMPTS = { service: prompt('service'), behaviour: prompt('behaviour'), bundle: prompt('bundle'), device: prompt('device') }
+const PROMPTS = { service: prompt('service'), behaviour: prompt('behaviour'), bundle: prompt('bundle'), device: prompt('device'), documentRules: prompt('document-rules'), assistant: prompt('assistant') }
 
 // One call to the model: system prompt + user text, answer forced to match `schema`.
-async function ask (system, text, name, schema, maxChars = 500) {
+async function ask (system, text, name, schema, { maxChars = 500, maxTokens = 400 } = {}) {
   text = String(text || '').trim().slice(0, maxChars)
   if (!text) throw new Error('Write a sentence first.')
   let res
@@ -30,7 +30,7 @@ async function ask (system, text, name, schema, maxChars = 500) {
         model: QVAC_MODEL,
         messages: [{ role: 'system', content: system }, { role: 'user', content: text }],
         temperature: 0,
-        max_tokens: 400,
+        max_tokens: maxTokens,
         reasoning_budget: false, // Qwen3.5: '/no_think' in the prompt gives HTTP 500 with a schema
         response_format: { type: 'json_schema', json_schema: { name, strict: true, schema } }
       }),
@@ -146,7 +146,8 @@ export async function textToBehaviour (text, services) {
 }
 
 // Model output → { trigger, action, text }. Throws with a message for the host if the rule is incomplete.
-function buildBehaviour (out, text) {
+// `source` is the text the host wrote (or the document): amounts are accepted only if written there.
+function buildBehaviour (out, text, source = text) {
   if (!TRIGGERS.includes(out.triggerKind)) throw new Error('I could not tell when this rule should run.')
   if (!ACTIONS.includes(out.actionKind)) throw new Error('I could not tell what this rule should do.')
 
@@ -165,7 +166,7 @@ function buildBehaviour (out, text) {
     action = { kind: 'propose_purchase', item }
     const quantity = int(out.purchaseQuantity, 1, 1000)
     if (quantity) action.quantity = quantity
-    if (written(out.purchaseMaxDollars, text)) action.maxAmount = cents(out.purchaseMaxDollars)
+    if (written(out.purchaseMaxDollars, source)) action.maxAmount = cents(out.purchaseMaxDollars)
   }
   if (out.actionKind === 'change_price') {
     const percent = int(out.pricePercent, -90, 200)
@@ -178,7 +179,7 @@ function buildBehaviour (out, text) {
   if (out.actionKind === 'lock' || out.actionKind === 'unlock') action = { kind: out.actionKind }
   if (out.actionKind === 'keep_deposit') {
     action = { kind: 'keep_deposit' }
-    if (written(out.depositDollars, text)) action.amount = cents(out.depositDollars)
+    if (written(out.depositDollars, source)) action.amount = cents(out.depositDollars)
   }
   return { trigger: { kind: out.triggerKind, value }, action, text: str(text, 200) }
 }
@@ -208,7 +209,7 @@ export async function deviceToService (descriptor) {
     },
     required: [...Object.keys(SERVICE_FIELDS), 'behaviours'],
     additionalProperties: false
-  }, 2000)
+  }, { maxChars: 2000, maxTokens: 900 })
   const behaviours = []
   for (const b of out.behaviours || []) {
     // A suggested rule that does not hold together is dropped, not shown: the host can always add rules by text.
@@ -218,6 +219,78 @@ export async function deviceToService (descriptor) {
   // Safety: a door is opened by the guest's key; a timed lock/unlock rule could lock a guest out at night.
   const safe = service.type === 'access' ? behaviours.filter((x) => !['lock', 'unlock'].includes(x.action.kind)) : behaviours
   return { service, behaviours: safe }
+}
+
+// ---------- house documents (private: contracts, rules, manuals stay in the hub) ----------
+// A document → the rules the devices can apply by themselves, proposed to the host.
+// → [{ serviceId, trigger, action, text }]  (0–8 rules; rules that do not hold together are dropped)
+export async function documentToBehaviours (text, services) {
+  const ids = serviceIds(services)
+  const out = await ask(`${PROMPTS.documentRules}\nThe hub's services:\n${listServices(services)}`, text, 'document_rules', {
+    type: 'object',
+    properties: {
+      rules: {
+        type: 'array',
+        maxItems: 8,
+        items: {
+          type: 'object',
+          properties: { serviceId: { type: 'string', enum: ids }, description: { type: 'string' }, ...BEHAVIOUR_FIELDS },
+          required: ['serviceId', 'description', ...Object.keys(BEHAVIOUR_FIELDS)],
+          additionalProperties: false
+        }
+      }
+    },
+    required: ['rules'],
+    additionalProperties: false
+  }, { maxChars: 6000, maxTokens: 1500 })
+  const rules = []
+  for (const r of out.rules || []) {
+    if (!ids.includes(r.serviceId)) continue
+    try {
+      const rule = { serviceId: r.serviceId, ...buildBehaviour(r, str(r.description, 200) || '', text) }
+      // the same rule twice (small models repeat themselves) is shown once
+      const same = (x) => x.serviceId === rule.serviceId && JSON.stringify([x.trigger, x.action]) === JSON.stringify([rule.trigger, rule.action])
+      if (!rules.some(same)) rules.push(rule)
+    } catch {}
+  }
+  return rules
+}
+
+// A guest's question → an answer taken only from the documents, with the document it comes from.
+// documents: [{ title, text }]. Short documents go to the model whole; long ones are cut to the paragraphs
+// that share the most words with the question (simple retrieval, no vector database).
+// → { answer, found, source }   (source = the document title, or null)
+export async function answerFromDocuments (question, documents) {
+  const docs = (documents || []).filter((d) => d && d.text).map((d, i) => ({ title: str(d.title, 80) || `Document ${i + 1}`, text: String(d.text) }))
+  if (!docs.length) throw new Error('The host has not added any document yet.')
+  const context = pickContext(String(question || ''), docs, 6000)
+  const titles = docs.map((d) => d.title)
+  const out = await ask(`${PROMPTS.assistant}\nDocuments:\n${context}`, question, 'answer', {
+    type: 'object',
+    properties: { answer: { type: 'string' }, found: { type: 'boolean' }, source: { type: 'string', enum: [...titles, ''] } },
+    required: ['answer', 'found', 'source'],
+    additionalProperties: false
+  }, { maxTokens: 300 })
+  const found = out.found === true && titles.includes(out.source)
+  return { answer: str(out.answer, 600) || 'Sorry, I do not know. Please ask the host.', found, source: found ? out.source : null }
+}
+
+// Whole documents if they fit in `budget` characters; otherwise the paragraphs with most words in common with the question.
+function pickContext (question, docs, budget) {
+  const whole = docs.map((d) => `### ${d.title}\n${d.text.trim()}`).join('\n\n')
+  if (whole.length <= budget) return whole
+  const wordsOf = (t) => t.toLowerCase().match(/[\p{L}\d]{4,}/gu) || []
+  const asked = new Set(wordsOf(question))
+  const parts = docs.flatMap((d) => d.text.split(/\n\s*\n|\n(?=\s*[-*#])/).map((p) => ({ title: d.title, p: p.trim() })).filter((x) => x.p))
+  for (const x of parts) x.score = wordsOf(x.p).filter((w) => asked.has(w)).length
+  const byDoc = {}
+  let used = 0
+  for (const x of parts.sort((a, b) => b.score - a.score)) {
+    if (used + x.p.length > budget) continue
+    ;(byDoc[x.title] ||= []).push(x.p)
+    used += x.p.length + 1
+  }
+  return Object.entries(byDoc).map(([t, ps]) => `### ${t}\n${ps.join('\n')}`).join('\n\n')
 }
 
 // ---------- text → bundle ----------
@@ -254,17 +327,26 @@ export async function textToBundle (text, services) {
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
   const [cmd, ...words] = process.argv.slice(2)
   const text = words.join(' ')
-  const demo = [
-    { id: 'door', name: 'Front door', type: 'access' },
-    { id: 'washer', name: 'Washing machine', type: 'use', price: 200 },
-    { id: 'bike', name: 'E-bike', type: 'rent', price: 300, maxHours: 4 },
-    { id: 'fridge', name: 'Minibar', type: 'use', price: 250 }
+  const demo = [ // the demo laundry (docs/PLAN.md "Demo scope")
+    { id: 'washer', name: 'Washing machine', type: 'use', price: 300 },
+    { id: 'dryer', name: 'Dryer', type: 'use', price: 200 }
   ]
   const services = process.env.HUB_URL
     ? (await (await fetch(`${process.env.HUB_URL.replace(/\/+$/, '')}/api/services`)).json()).services
     : demo
-  const fn = { service: () => textToService(text), behaviour: () => textToBehaviour(text, services), bundle: () => textToBundle(text, services), device: () => deviceToService(text) }[cmd]
-  if (!fn) { console.error('usage: node src/ai.js service|behaviour|bundle|device <text or descriptor JSON>'); process.exit(1) }
+  // the demo documents: prompts/documents/*.md, title = file name
+  const docsDir = new URL('../prompts/documents/', import.meta.url)
+  const documents = () => fs.readdirSync(docsDir).filter((f) => f.endsWith('.md'))
+    .map((f) => ({ title: f.replace(/\.md$/, ''), text: fs.readFileSync(new URL(f, docsDir), 'utf8') }))
+  const fn = {
+    service: () => textToService(text),
+    behaviour: () => textToBehaviour(text, services),
+    bundle: () => textToBundle(text, services),
+    device: () => deviceToService(text),
+    rules: () => documentToBehaviours(fs.readFileSync(text, 'utf8'), services), // text = path of a document
+    ask: () => answerFromDocuments(text, documents())
+  }[cmd]
+  if (!fn) { console.error('usage: node src/ai.js service|behaviour|bundle|device|rules|ask <text, descriptor JSON or document path>'); process.exit(1) }
   const t = Date.now()
   try {
     console.log(JSON.stringify(await fn(), null, 2))

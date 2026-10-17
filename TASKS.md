@@ -55,7 +55,7 @@ Tasks about stay keys and the door (3, part of 19) and the bike (5) are **droppe
 | 13 | QVAC server + `src/ai.js`: text → service, behaviour, bundle | 3c | — | done |
 | 14 | `/api/ai/*` routes in `hub.js` (service, behaviour: owner; bundle: public), agreed with Alessandro | 6 | Sat evening | todo |
 | 15 | Plug-and-play: device descriptor → proposed service + behaviours | 3a | Sun 10:00 | done (`deviceToService`, contract in CLAUDE.md; route /api/ai/device in #14) |
-| 16 | House documents: contract → proposed behaviours; guest questions answered from the documents (RAG) | 3b | Sun 10:00 | doing |
+| 16 | House documents: contract → proposed behaviours; guest questions answered from the documents (RAG) | 3b | Sun 10:00 | done (`documentToBehaviours`, `answerFromDocuments`; demo docs in prompts/documents/; routes in #14) |
 | 17 | Questions to mentors: QVAC on another LAN machine counts as on-device? WDK bonus with watch-only hubs? 0-conf unlock? | 0-bis | Sat 15:00 | doing (answers 1–3 in Notes; own asset on signet and RAG still to ask) |
 | 18 | Decide where QVAC runs in the demo (demo PC or Lapo's GPU PC) and measure answer time there | 0-bis | Sat 18:00 | done (Lapo's GPU PC, mentor OK; ~1–5 s per answer) |
 
