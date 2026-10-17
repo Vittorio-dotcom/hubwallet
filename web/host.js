@@ -187,9 +187,28 @@ function renderDevice () {
     el('a', { class: 'small', href: `${example() ? '' : hub().url}/device.html?id=${encodeURIComponent(d.id)}`, target: '_blank', rel: 'noopener' }, 'Open the device screen'),
     example() ? null : el('div', { class: 'row' }, el('span', { class: 'small muted grow' }, 'Demo clock (to show time rules)'),
       el('select', { class: 'input', 'aria-label': 'Pretend it is', on: { change: (e) => setClock(e.target.value) } },
-        el('option', { value: '' }, 'real time'), ...Array.from({ length: 24 }, (_, i) => el('option', { value: String(i) }, `${i}:00`)))))
+        el('option', { value: '' }, 'real time'), ...Array.from({ length: 24 }, (_, i) => el('option', { value: String(i) }, `${i}:00`)))),
+    example() ? null : el('div', { id: 'remove-box', class: 'row' },
+      el('button', { class: 'btn danger', type: 'button', on: { click: askRemove } }, 'Remove device')))
   const { state: _s, earned: _e, uses: _u, basePrice: _b, lastTriggered: _l, ...cfg } = d
   $('#device-json').textContent = JSON.stringify(cfg, null, 2)
+}
+// Remove a device (DELETE /api/devices/:id), with an in-page confirmation. Earnings already received stay in the hub wallet.
+function askRemove () {
+  const d = current
+  if (d.state?.status === 'running') { fill($('#remove-box'), el('div', { class: 'notice bad' }, 'This device is running: wait until it finishes, then remove it.')); return }
+  fill($('#remove-box'), el('div', { class: 'card warn-card' },
+    el('strong', {}, `Remove "${d.name}" from ${hub().name}?`),
+    el('p', { class: 'small' }, 'Guests will no longer see it. Its configuration file is deleted; money already received stays on the hub.'),
+    el('div', { class: 'row' },
+      el('button', { class: 'btn danger', type: 'button', on: { click: removeDevice } }, 'Yes, remove it'),
+      el('button', { class: 'btn', type: 'button', on: { click: renderDevice } }, 'Cancel'))))
+}
+async function removeDevice () {
+  try {
+    await call(`${hub().url}/api/devices/${encodeURIComponent(current.id)}`, { key: hub().key, method: 'DELETE' })
+    show(null); await refresh()
+  } catch (e) { fill($('#remove-box'), el('div', { class: 'notice bad' }, e.message)) }
 }
 async function setClock (v) {
   try { await call(hub().url + '/api/devices/clock', { key: hub().key, body: { hour: v === '' ? null : Number(v) } }); await refresh() } catch (e) { fill($('#edit-out'), el('div', { class: 'notice bad' }, e.message)) }
