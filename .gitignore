@@ -3,3 +3,6 @@ data/
 node_modules/
 .env
 *.log
+# Alessandro's personal folder (notes, manual tests), never committed
+alessandro/
+.DS_Store
