@@ -147,7 +147,7 @@ async function sweep (h, amount) {
   try {
     if (example()) { h.toSign.push({ id: 'ex', description: `Send ${money(amount)} ${DOLLAR} from ${h.name} to your wallet`, amount }); render(); return }
     // the host's wallet makes an invoice for "any asset" (it may never have seen HUSD), the hub prepares the transfer
-    const inv = await call(w.url + '/api/receive', { body: { amount, description: `Earnings from ${h.name}` } })
+    const inv = await call(w.url + '/api/receive', { body: { amount, witness: true, description: `Earnings from ${h.name}` } }) // witness: the host's wallet needs no UTXO of its own
     await call(h.url + '/api/transfers', { key: h.key, body: { assetId: h.dollarId, amount, invoice: inv.invoice, description: `Sweep ${money(amount)} ${DOLLAR} from ${h.name} to ${w.label}` } })
     await refresh()
   } catch (e) { $('#hub-card').append(el('div', { class: 'notice bad' }, e.message)) }

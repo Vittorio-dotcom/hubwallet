@@ -6,3 +6,4 @@ node_modules/
 # Alessandro's personal folder (notes, manual tests), never committed
 alessandro/
 .DS_Store
+.playwright-mcp/
