@@ -13,6 +13,8 @@ const $ = (s) => document.querySelector(s)
 const money = (cents) => (Number(cents || 0) / 100).toFixed(2)
 const DOLLAR = 'HUSD'
 
+// Fills a node, skipping null/false parts (native replaceChildren would print them as the text "null").
+const fill = (node, ...parts) => node.replaceChildren(...parts.flat().filter((x) => x !== null && x !== undefined && x !== false))
 function el (tag, props = {}, ...children) {
   const n = document.createElement(tag)
   for (const [k, v] of Object.entries(props)) {
@@ -101,34 +103,34 @@ function render () {
       el('span', { class: 'hint' }, `${(w.me.btc?.vanilla?.spendable ?? 0).toLocaleString('en')} sats · receives your hubs' earnings`)))
   cards.push(el('button', { class: 'wcard add', type: 'button', on: { click: () => show('add-wallet') } },
     el('strong', { style: 'font-size:22px' }, wallets.length ? '+ Add wallet' : 'Connect your wallet'), el('span', { class: 'hint' }, 'Your personal HubWallet (WDK) wallet')))
-  $('#wallets').replaceChildren(...cards)
-  $('#dots').replaceChildren(...cards.map((_, i) => el('span', { class: i === walletIndex ? 'on' : '' })))
+  fill($('#wallets'), ...cards)
+  fill($('#dots'), ...cards.map((_, i) => el('span', { class: i === walletIndex ? 'on' : '' })))
 
   // hub chips
-  $('#hub-chips').replaceChildren(...hubs.map((h, i) => el('button', { class: 'chip', type: 'button', role: 'tab', 'aria-selected': String(i === hubIndex), on: { click: () => { hubIndex = i; save_('hostHubIndex', i); render() } } }, h.name)),
+  fill($('#hub-chips'), ...hubs.map((h, i) => el('button', { class: 'chip', type: 'button', role: 'tab', 'aria-selected': String(i === hubIndex), on: { click: () => { hubIndex = i; save_('hostHubIndex', i); render() } } }, h.name)),
     el('button', { class: 'chip', type: 'button', on: { click: () => show('add-hub') } }, '+ Add hub'))
   const h = hub()
-  if (!h) { $('#hub-card').replaceChildren(); $('#to-sign').replaceChildren(); $('#devices').replaceChildren(); return }
+  if (!h) { fill($('#hub-card'), ); fill($('#to-sign'), ); fill($('#devices'), ); return }
   if (h.error) {
-    $('#hub-card').replaceChildren(el('div', { class: 'notice bad' }, `${h.url}: ${h.error}`),
+    fill($('#hub-card'), el('div', { class: 'notice bad' }, `${h.url}: ${h.error}`),
       el('button', { class: 'btn', type: 'button', on: { click: () => removeHub(hubIndex) } }, 'Remove this hub'))
-    $('#to-sign').replaceChildren(); $('#devices').replaceChildren(); return
+    fill($('#to-sign'), ); fill($('#devices'), ); return
   }
   const earned = husdOf(h.wallet?.assets, h.dollarId)
-  $('#hub-card').replaceChildren(el('div', { class: 'card' },
+  fill($('#hub-card'), el('div', { class: 'card' },
     el('div', { class: 'row' }, el('div', { class: 'grow' }, el('span', { class: 'label' }, 'Earnings on this hub'),
       el('div', {}, el('span', { style: 'font-size:28px;font-weight:700' }, money(earned)), ' ', DOLLAR)),
       el('button', { class: 'btn', type: 'button', disabled: earned <= 0 || h.toSign.length > 0 || !wallets.some((w) => !w.error), on: { click: () => sweep(h, earned) } }, 'Sweep to my wallet')),
     el('p', { class: 'small muted' }, `${(h.wallet?.btc?.vanilla?.spendable ?? 0).toLocaleString('en')} sats for fees · ${h.wallet?.freeColorableUtxos ?? 0} free UTXOs · the hub can receive but never spend`)))
 
-  $('#to-sign').replaceChildren(...h.toSign.map((it) => el('div', { class: 'card warn-card' },
+  fill($('#to-sign'), ...h.toSign.map((it) => el('div', { class: 'card warn-card' },
     el('span', { class: 'label' }, 'Waiting for your signature'),
     el('strong', {}, it.description || it.summary || it.kind),
     it.amount ? el('span', { class: 'small' }, `${money(it.amount)} ${DOLLAR}`) : null,
     el('p', { class: 'small muted' }, 'Approve it on your signer (the host phone). From here you can only reject it.'),
     el('button', { class: 'btn', type: 'button', on: { click: () => reject(h, it) } }, 'Reject'))))
 
-  $('#devices').replaceChildren(...(h.devices.length ? h.devices.map((d) => {
+  fill($('#devices'), ...(h.devices.length ? h.devices.map((d) => {
     const st = d.state?.status || 'idle'
     return el('button', { class: 'tile', type: 'button', on: { click: () => openDevice(d) }, 'aria-label': d.name },
       el('span', { class: 'ic', 'aria-hidden': 'true' }, d.icon || '🧩'), el('span', { class: 'name' }, d.name),
@@ -170,10 +172,10 @@ function proposal (cur, next, diffList, onApply) {
 
 // ---------- a device: details, edit with the AI, demo clock ----------
 let current = null
-function openDevice (d) { current = d; $('#device-title').textContent = d.name; $('#edit-text').value = ''; $('#edit-out').replaceChildren(); renderDevice(); show('device') }
+function openDevice (d) { current = d; $('#device-title').textContent = d.name; $('#edit-text').value = ''; fill($('#edit-out'), ); renderDevice(); show('device') }
 function renderDevice () {
   const d = current
-  $('#device-body').replaceChildren(
+  fill($('#device-body'), 
     el('div', { class: 'row' }, el('span', { style: 'font-size:40px', 'aria-hidden': 'true' }, d.icon || '🧩'),
       el('div', { class: 'grow' }, el('strong', {}, d.name), el('div', { class: 'small muted' }, `${money(d.price)} ${DOLLAR} / ${d.unit} · version ${d.version} · ${d.uses ?? 0} uses`))),
     el('span', { class: 'label' }, 'Rules'),
@@ -186,35 +188,35 @@ function renderDevice () {
   $('#device-json').textContent = JSON.stringify(cfg, null, 2)
 }
 async function setClock (v) {
-  try { await call(hub().url + '/api/devices/clock', { key: hub().key, body: { hour: v === '' ? null : Number(v) } }); await refresh() } catch (e) { $('#edit-out').replaceChildren(el('div', { class: 'notice bad' }, e.message)) }
+  try { await call(hub().url + '/api/devices/clock', { key: hub().key, body: { hour: v === '' ? null : Number(v) } }); await refresh() } catch (e) { fill($('#edit-out'), el('div', { class: 'notice bad' }, e.message)) }
 }
 $('#edit-form').addEventListener('submit', async (e) => {
   e.preventDefault()
   const text = $('#edit-text').value.trim(); if (!text) return
-  if (example()) { $('#edit-out').replaceChildren(el('div', { class: 'notice' }, 'Connect a hub to edit devices with its AI.')); return }
-  $('#edit-out').replaceChildren(el('p', { class: 'small muted' }, 'The hub\'s AI is thinking…'))
+  if (example()) { fill($('#edit-out'), el('div', { class: 'notice' }, 'Connect a hub to edit devices with its AI.')); return }
+  fill($('#edit-out'), el('p', { class: 'small muted' }, 'The hub\'s AI is thinking…'))
   try {
     const h = hub()
     const r = await call(`${h.url}/api/devices/${encodeURIComponent(current.id)}/edit`, { key: h.key, body: { text } })
-    $('#edit-out').replaceChildren(proposal(current, r.proposed, r.diff || [], async () => {
+    fill($('#edit-out'), proposal(current, r.proposed, r.diff || [], async () => {
       try {
         const saved = await call(`${h.url}/api/devices/${encodeURIComponent(current.id)}/apply`, { key: h.key, body: { config: r.proposed } })
         await refresh(); current = hub().devices.find((x) => x.id === saved.id) || current
-        $('#edit-out').replaceChildren(el('div', { class: 'notice ok' }, `Saved as version ${saved.version}.`)); renderDevice()
-      } catch (err) { $('#edit-out').replaceChildren(el('div', { class: 'notice bad' }, err.message)) }
+        fill($('#edit-out'), el('div', { class: 'notice ok' }, `Saved as version ${saved.version}.`)); renderDevice()
+      } catch (err) { fill($('#edit-out'), el('div', { class: 'notice bad' }, err.message)) }
     }))
-  } catch (err) { $('#edit-out').replaceChildren(el('div', { class: 'notice bad' }, err.message)) }
+  } catch (err) { fill($('#edit-out'), el('div', { class: 'notice bad' }, err.message)) }
 })
 
 // ---------- add a device: guided chat with the hub's AI ----------
 let messages = []
 function drawChat () {
-  $('#dev-chat').replaceChildren(...messages.map((m) => el('div', { class: `msg ${m.role === 'ai' ? 'ai' : 'me'}` }, el('span', { class: 'by' }, m.role === 'ai' ? 'Hub AI · local' : 'You'), m.text)))
+  fill($('#dev-chat'), ...messages.map((m) => el('div', { class: `msg ${m.role === 'ai' ? 'ai' : 'me'}` }, el('span', { class: 'by' }, m.role === 'ai' ? 'Hub AI · local' : 'You'), m.text)))
   $('#dev-chat').scrollTop = $('#dev-chat').scrollHeight
 }
 $('#add-device').onclick = () => {
   messages = [{ role: 'ai', text: 'Hi! What device do you want to connect? For example "a dryer, 2 dollars per cycle".' }]
-  $('#add-dev-out').replaceChildren(); $('#dev-chat-text').value = ''
+  fill($('#add-dev-out'), ); $('#dev-chat-text').value = ''
   drawChat(); show('add-dev'); $('#dev-chat-text').focus()
 }
 $('#dev-chat-form').addEventListener('submit', async (e) => {
@@ -229,7 +231,7 @@ $('#dev-chat-form').addEventListener('submit', async (e) => {
     const r = await call(h.url + '/api/devices/chat', { key: h.key, body: { messages: messages.slice(0, -1) } })
     messages[messages.length - 1] = { role: 'ai', text: r.reply || 'Here is my proposal.' }; drawChat()
     if (r.proposed) {
-      $('#add-dev-out').replaceChildren(proposal(null, r.proposed, [], async () => {
+      fill($('#add-dev-out'), proposal(null, r.proposed, [], async () => {
         try { await call(h.url + '/api/devices', { key: h.key, body: { config: r.proposed } }); show(null); await refresh() } catch (err) { $('#add-dev-out').append(el('div', { class: 'notice bad' }, err.message)) }
       }))
     }
@@ -240,24 +242,24 @@ $('#dev-chat-form').addEventListener('submit', async (e) => {
 $('#add-hub-form').addEventListener('submit', async (e) => {
   e.preventDefault()
   const url = normUrl($('#hub-url').value); const key = $('#hub-key').value.trim()
-  if (!url || !key) { $('#add-hub-msg').replaceChildren(el('div', { class: 'notice bad' }, 'Enter the hub address (e.g. 192.168.7.246:8080) and its owner key.')); return }
+  if (!url || !key) { fill($('#add-hub-msg'), el('div', { class: 'notice bad' }, 'Enter the hub address (e.g. 192.168.7.246:8080) and its owner key.')); return }
   try {
     await call(url + '/api/wallet', { key }) // checks both the address and the owner key
     if (!hubCfg.some((x) => x.url === url)) hubCfg.push({ url, key })
     save_('hostHubs', hubCfg); hubIndex = hubCfg.findIndex((x) => x.url === url); save_('hostHubIndex', hubIndex)
     $('#hub-key').value = ''; show(null); await refresh()
-  } catch (err) { $('#add-hub-msg').replaceChildren(el('div', { class: 'notice bad' }, `Could not open the hub: ${err.message}`)) }
+  } catch (err) { fill($('#add-hub-msg'), el('div', { class: 'notice bad' }, `Could not open the hub: ${err.message}`)) }
 })
 function removeHub (i) { hubCfg.splice(i, 1); save_('hostHubs', hubCfg); hubIndex = 0; save_('hostHubIndex', 0); refresh() }
 $('#add-wallet-form').addEventListener('submit', async (e) => {
   e.preventDefault()
   const url = normUrl($('#wallet-url').value)
-  if (!url) { $('#add-wallet-msg').replaceChildren(el('div', { class: 'notice bad' }, 'Enter an address like http://127.0.0.1:8091.')); return }
+  if (!url) { fill($('#add-wallet-msg'), el('div', { class: 'notice bad' }, 'Enter an address like http://127.0.0.1:8091.')); return }
   try {
     await call(url + '/api/me')
     if (!walletCfg.some((x) => x.url === url)) walletCfg.push({ url, label: walletCfg.length ? `Wallet ${walletCfg.length + 1}` : 'My wallet' })
     save_('hostWallets', walletCfg); show(null); await refresh()
-  } catch (err) { $('#add-wallet-msg').replaceChildren(el('div', { class: 'notice bad' }, `No wallet answers at ${url}: ${err.message}`)) }
+  } catch (err) { fill($('#add-wallet-msg'), el('div', { class: 'notice bad' }, `No wallet answers at ${url}: ${err.message}`)) }
 })
 
 // ---------- sheets ----------

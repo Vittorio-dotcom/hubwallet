@@ -13,6 +13,8 @@ const GUEST = (() => {
   try { const u = new URL(qs.get('guest') || fallback); return /^https?:$/.test(u.protocol) ? u.origin + u.pathname : fallback } catch { return fallback }
 })()
 
+// Fills a node, skipping null/false parts (native replaceChildren would print them as the text "null").
+const fill = (node, ...parts) => node.replaceChildren(...parts.flat().filter((x) => x !== null && x !== undefined && x !== false))
 function el (tag, props = {}, ...children) {
   const n = document.createElement(tag)
   for (const [k, v] of Object.entries(props)) {
@@ -62,15 +64,15 @@ async function load () {
 function render () {
   const screen = $('#screen')
   if (!ID) { // device picker
-    screen.replaceChildren(el('h1', {}, data.name || 'Hub'), el('p', { class: 'muted' }, 'Choose the device this screen stands for.'),
+    fill(screen, el('h1', {}, data.name || 'Hub'), el('p', { class: 'muted' }, 'Choose the device this screen stands for.'),
       ...data.services.map((s) => el('a', { class: 'btn block', href: `?id=${encodeURIComponent(s.id)}` }, `${s.icon || '🧩'} ${s.name}`)))
     return
   }
   const s = data.services.find((x) => x.id === ID)
-  if (!s) { screen.replaceChildren(el('div', { class: 'empty' }, `No device "${ID}" on this hub.`)); return }
+  if (!s) { fill(screen, el('div', { class: 'empty' }, `No device "${ID}" on this hub.`)); return }
   const st = status(s)
   const rules = s.rules || s.behaviours || []
-  screen.replaceChildren(
+  fill(screen, 
     el('div', { class: 'row' }, el('span', { class: 'label grow' }, data.name || 'Hub'), example ? el('span', { class: 'demo-tag' }, 'Example data') : null),
     el('div', { class: `dev-state ${st.key}` },
       el('span', { class: 'dev-icon', 'aria-hidden': 'true' }, s.icon || '🧩'),
@@ -92,8 +94,8 @@ function drawQr () {
   const box = document.getElementById('qr'); if (!box) return
   const u = new URL(GUEST); u.searchParams.set('hubs', HUB)
   const url = u.toString()
-  if (window.QRCode) { box.replaceChildren(); new window.QRCode(box, { text: url, width: 148, height: 148, correctLevel: window.QRCode.CorrectLevel.M }) }
-  else box.replaceChildren(el('a', { href: url, class: 'small' }, 'Open HubWallet'))
+  if (window.QRCode) { fill(box, ); new window.QRCode(box, { text: url, width: 148, height: 148, correctLevel: window.QRCode.CorrectLevel.M }) }
+  else fill(box, el('a', { href: url, class: 'small' }, 'Open HubWallet'))
   qrDone = true
 }
 

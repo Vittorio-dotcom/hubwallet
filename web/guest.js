@@ -15,6 +15,8 @@ const load_ = (k, d) => { try { return JSON.parse(localStorage.getItem(k)) ?? d 
 const save_ = (k, v) => { try { localStorage.setItem(k, JSON.stringify(v)) } catch {} }
 
 // ---------- DOM helper: elements with text only (no HTML injection) ----------
+// Fills a node, skipping null/false parts (native replaceChildren would print them as the text "null").
+const fill = (node, ...parts) => node.replaceChildren(...parts.flat().filter((x) => x !== null && x !== undefined && x !== false))
 function el (tag, props = {}, ...children) {
   const n = document.createElement(tag)
   for (const [k, v] of Object.entries(props)) {
@@ -117,7 +119,7 @@ function render () {
   $('#demo-tag').hidden = !demoHubs && current()?.url !== EXAMPLE_WALLET
 
   // offered hubs (from a QR link): connect only after confirmation
-  $('#offer').replaceChildren(...offered.map((url) => el('div', { class: 'card' },
+  fill($('#offer'), ...offered.map((url) => el('div', { class: 'card' },
     el('span', { class: 'label' }, 'Hub from a link'), el('span', { class: 'mono' }, url),
     el('p', { class: 'small muted' }, 'Connect only if you trust this hub (for example you scanned its QR code).'),
     el('div', { class: 'row' },
@@ -131,15 +133,15 @@ function render () {
     el('strong', { style: 'font-size:22px' }, wallets.length ? '+ Add wallet' : 'Connect a wallet'),
     el('span', { class: 'hint' }, 'HubWallet (WDK) or another RGB wallet ›')))
   const car = $('#wallets'); const keep = car.scrollLeft
-  car.replaceChildren(...cards)
+  fill(car, ...cards)
   car.scrollLeft = keep
-  $('#dots').replaceChildren(...cards.map((_, i) => el('span', { class: i === active ? 'on' : '' })))
+  fill($('#dots'), ...cards.map((_, i) => el('span', { class: i === active ? 'on' : '' })))
 
   // devices of the connected hubs, filtered by the search text
   const q = query.toLowerCase()
   const tiles = hubs.flatMap((h) => h.services.filter((s) => KIND[s.type]).map((s) => ({ h, s })))
     .filter(({ h, s }) => !q || h.name.toLowerCase().includes(q) || s.name.toLowerCase().includes(q))
-  $('#devices').replaceChildren(...(tiles.length
+  fill($('#devices'), ...(tiles.length
     ? tiles.map(({ h, s }) => {
         const [label, cls] = stateOf(s)
         return el('button', { class: 'tile', type: 'button', on: { click: () => openDevice(h, s) }, 'aria-label': `${s.name}, ${priceText(s)}` },
@@ -153,7 +155,7 @@ function render () {
   $('#wallet-title').textContent = current()?.label || 'Wallet'
   $('#address').textContent = d?.me?.address || '–'
   const tr = d?.transfers || []
-  $('#moves').replaceChildren(...(tr.length
+  fill($('#moves'), ...(tr.length
     ? [...tr].sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0)).map((t) => {
         const amt = (t.assignments || []).reduce((s, a) => s + Number(a.Fungible || 0), 0) || Number(t.requestedAssignment?.Fungible || 0)
         const kind = typeof t.kind === 'number' ? ['Issuance', 'ReceiveBlind', 'ReceiveWitness', 'Send', 'Inflation'][t.kind] : t.kind
@@ -166,16 +168,16 @@ function render () {
           t.txid ? el('a', { href: 'https://mutinynet.com/tx/' + t.txid, target: '_blank', rel: 'noopener', class: 'small' }, 'tx') : null)
       })
     : [el('div', { class: 'empty' }, 'No movements yet.')]))
-  $('#tab-keys').replaceChildren(...(keys().length
+  fill($('#tab-keys'), ...(keys().length
     ? keys().map((a) => el('div', { class: 'key' }, el('span', { class: 'label' }, 'Key · RGB asset'), el('strong', {}, a.name), el('span', { class: 'mono' }, a.ticker)))
     : [el('div', { class: 'empty' }, 'No access keys in this wallet.')]))
 
   // user + connect sheets
-  $('#wallet-list').replaceChildren(...(wallets.length ? wallets.map((w, i) => el('div', {}, el('span', { class: 'grow' }, w.label), el('span', { class: 'small muted mono' }, w.url === EXAMPLE_WALLET ? 'example' : w.url),
+  fill($('#wallet-list'), ...(wallets.length ? wallets.map((w, i) => el('div', {}, el('span', { class: 'grow' }, w.label), el('span', { class: 'small muted mono' }, w.url === EXAMPLE_WALLET ? 'example' : w.url),
     el('button', { class: 'btn', type: 'button', on: { click: () => removeWallet(i) } }, 'Remove'))) : [el('div', { class: 'small muted' }, 'No wallet connected.')]))
-  $('#hub-list').replaceChildren(...(hubUrls.length ? hubUrls.map((u) => el('div', {}, el('span', { class: 'grow mono small' }, u),
+  fill($('#hub-list'), ...(hubUrls.length ? hubUrls.map((u) => el('div', {}, el('span', { class: 'grow mono small' }, u),
     el('button', { class: 'btn', type: 'button', on: { click: () => { hubUrls = hubUrls.filter((x) => x !== u); save_('hubUrls', hubUrls); refresh() } } }, 'Remove'))) : [el('div', { class: 'small muted' }, 'No hub connected.')]))
-  $('#providers').replaceChildren(...PROVIDERS.map((p) => el('div', {}, el('div', { class: 'grow' }, el('div', {}, p.name), el('div', { class: 'small muted' }, `${p.note} · not supported in the demo`)),
+  fill($('#providers'), ...PROVIDERS.map((p) => el('div', {}, el('div', { class: 'grow' }, el('div', {}, p.name), el('div', { class: 'small muted' }, `${p.note} · not supported in the demo`)),
     el('a', { href: p.url, target: '_blank', rel: 'noopener', class: 'small' }, 'Website'))))
 }
 
@@ -188,10 +190,10 @@ $('#wallets').addEventListener('scroll', () => {
 
 // ---------- wallets ----------
 async function addWallet (url, label) {
-  if (wallets.some((w) => w.url === url)) { $('#connect-msg').replaceChildren(el('div', { class: 'notice bad' }, 'This wallet is already connected.')); return }
+  if (wallets.some((w) => w.url === url)) { fill($('#connect-msg'), el('div', { class: 'notice bad' }, 'This wallet is already connected.')); return }
   const w = { url, label: label || `Wallet ${wallets.length + 1}` }
   await loadWallet(w)
-  if (!walletData[url].ok) { $('#connect-msg').replaceChildren(el('div', { class: 'notice bad' }, `No wallet answers at ${url}.`)); return }
+  if (!walletData[url].ok) { fill($('#connect-msg'), el('div', { class: 'notice bad' }, `No wallet answers at ${url}.`)); return }
   wallets.push(w); active = wallets.length - 1
   save_('wallets', wallets); save_('activeWallet', active)
   show(null); render()
@@ -204,7 +206,7 @@ function removeWallet (i) {
 $('#connect-form').addEventListener('submit', (e) => {
   e.preventDefault()
   const url = normUrl($('#wallet-url').value)
-  if (!url) { $('#connect-msg').replaceChildren(el('div', { class: 'notice bad' }, 'Enter an address like http://127.0.0.1:8090.')); return }
+  if (!url) { fill($('#connect-msg'), el('div', { class: 'notice bad' }, 'Enter an address like http://127.0.0.1:8090.')); return }
   addWallet(url, 'HubWallet')
 })
 $('#example-wallet').onclick = () => addWallet(EXAMPLE_WALLET, 'Example wallet')
@@ -213,7 +215,7 @@ $('#example-wallet').onclick = () => addWallet(EXAMPLE_WALLET, 'Example wallet')
 function addHub (url) {
   if (!hubUrls.includes(url)) hubUrls.push(url)
   offered = offered.filter((x) => x !== url)
-  save_('hubUrls', hubUrls); $('#search-out').replaceChildren(); refresh()
+  save_('hubUrls', hubUrls); fill($('#search-out'), ); refresh()
 }
 $('#search-form').addEventListener('submit', async (e) => {
   e.preventDefault()
@@ -221,16 +223,16 @@ $('#search-form').addEventListener('submit', async (e) => {
   const url = /[.:]/.test(text) ? normUrl(text) : null
   if (!url) { query = text; render(); return } // a name: filter the connected hubs and their devices
   query = ''
-  $('#search-out').replaceChildren(el('p', { class: 'small muted' }, `Looking for a hub at ${url}…`))
+  fill($('#search-out'), el('p', { class: 'small muted' }, `Looking for a hub at ${url}…`))
   try {
     const info = await api(url + '/api/hub/info') // public: { name, network, hubKey }
     const h = await api(url + '/api/services').catch(() => ({ services: [] }))
-    $('#search-out').replaceChildren(el('div', { class: 'card' },
+    fill($('#search-out'), el('div', { class: 'card' },
       el('span', { class: 'label' }, 'Hub found'), el('strong', {}, info.name || 'Unnamed hub'), el('span', { class: 'mono small' }, url),
       el('span', { class: 'small muted' }, `${(h.services || []).length} devices · network ${info.network || '?'}`),
       hubUrls.includes(url) ? el('span', { class: 'small' }, 'Already connected.')
         : el('button', { class: 'btn primary', type: 'button', on: { click: () => addHub(url) } }, 'Connect to this hub')))
-  } catch { $('#search-out').replaceChildren(el('div', { class: 'notice bad' }, `No hub answers at ${url}.`)) }
+  } catch { fill($('#search-out'), el('div', { class: 'notice bad' }, `No hub answers at ${url}.`)) }
 })
 $('#search').addEventListener('input', (e) => { if (!/[.:]/.test(e.target.value)) { query = e.target.value.trim(); render() } })
 
@@ -256,7 +258,7 @@ function renderDevice (h, s) {
   const amount = s.type === 'rent' ? s.price * hours : s.price
   const w = current()
   const canPay = !busy && !!w && !['running', 'rented'].includes(s.device?.state) && s.type !== 'access'
-  $('#dev-body').replaceChildren(
+  fill($('#dev-body'), 
     el('div', { class: 'row' }, el('span', { style: 'font-size:40px', 'aria-hidden': 'true' }, s.icon || '🧩'),
       el('div', { class: 'grow' }, el('strong', {}, s.name), el('div', { class: 'small muted' }, `${KIND[s.type]} · ${h.name}`)),
       el('span', { class: `pill ${cls}` }, label)),
@@ -272,9 +274,9 @@ function renderDevice (h, s) {
 const STEPS = ['Invoice from the hub', 'Paid from your wallet', 'Waiting for Bitcoin confirmation', 'Done']
 function track (step, msg, cls, link) {
   $('#track').hidden = false
-  $('#track-steps').replaceChildren(...STEPS.map((t, i) => el('li', { class: i < step ? 'done' : i === step ? 'on' : '' }, t)))
-  $('#track-msg').replaceChildren(msg ? el('div', { class: `notice ${cls || ''}` }, msg) : '')
-  $('#track-link').replaceChildren(link && /^https:\/\//.test(link) ? el('a', { href: link, target: '_blank', rel: 'noopener', class: 'small' }, 'See the transaction on the explorer') : '')
+  fill($('#track-steps'), ...STEPS.map((t, i) => el('li', { class: i < step ? 'done' : i === step ? 'on' : '' }, t)))
+  fill($('#track-msg'), msg ? el('div', { class: `notice ${cls || ''}` }, msg) : '')
+  fill($('#track-link'), link && /^https:\/\//.test(link) ? el('a', { href: link, target: '_blank', rel: 'noopener', class: 'small' }, 'See the transaction on the explorer') : '')
 }
 // Payment flow of API_usage.md §4 (payer wallet = src/guest.js):
 //   1. the hub creates the payment request (service layer: POST /api/services/:id/order → id = payment id)
@@ -329,7 +331,7 @@ async function pay (h, s) {
 function confirmPay (c, h) {
   return new Promise((resolve) => {
     $('#track').hidden = false
-    $('#track-msg').replaceChildren(el('div', { class: 'card' },
+    fill($('#track-msg'), el('div', { class: 'card' },
       el('span', { class: 'label' }, 'Checked by your wallet'),
       el('strong', {}, `Pay ${money(c.amount)} ${DOLLAR} to ${c.hub || h.name}`),
       el('span', { class: 'small' }, c.description || ''),
