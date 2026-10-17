@@ -80,7 +80,14 @@ async function load () {
 
 const dollar = () => (me?.assets?.nia || []).find((a) => a.ticker === DOLLAR)
 const keys = () => (me?.assets?.nia || []).filter((a) => a.ticker.startsWith('STAY') && a.balance.spendable > 0)
-const keyFor = (h) => keys().find((k) => String(k.name || '').toLowerCase().startsWith(String(h.name || '').toLowerCase()))
+// Weak binding by name (until keys carry the issuing hub's identity): the hub must have a name,
+// no other connected hub may share it, and the key name must be exactly "<hub name> stay ...".
+function keyFor (h) {
+  const name = String(h.name || '').trim()
+  if (!name) return null
+  if (hubs.filter((x) => String(x.name || '').trim().toLowerCase() === name.toLowerCase()).length > 1) return null
+  return keys().find((k) => String(k.name || '').startsWith(name + ' stay ')) || null
+}
 const KIND = { access: 'Access', use: 'Pay per use', rent: 'Rental' }
 
 function stateOf (s) {

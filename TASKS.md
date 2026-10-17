@@ -79,7 +79,7 @@ Task numbers 17, 24, 25 and 26 are referenced by the plan: keep them.
 | 33 | Raspberry/ESP32 device driven by the hub | — | later |
 
 ## Notes
-- **For Alessandro (from the guest app, web/guest.js):** the app sends a stay key only to the hub whose `name` the key's asset name starts with, so please name stay keys `"<HUB_NAME> stay <from>-<to>"`. Defence in depth for later: let the guest wallet (`/api/pay`) refuse invoices from hubs the guest has not confirmed.
+- **For Alessandro (from the guest app, web/guest.js):** the app sends a stay key only to the hub whose `name` the key's asset name starts with, so please name stay keys `"<HUB_NAME> stay <from>-<to>"`. Defence in depth for later: let the guest wallet (`/api/pay`) refuse invoices from hubs the guest has not confirmed. The name match is weak (a hub can claim any name): the robust fix is to record the issuing hub's identity when the key is received (e.g. the hub's xpub/fingerprint or URL stored by `guest.js` with the key) and send the key back only to that hub.
 - Demo PC (Vittorio, Linux): `192.168.7.246`. AI server (Lapo, GPU): `http://192.168.6.169:11434`, ~1–2 s per answer.
 - Demo rental hour = 1 minute (`HOUR_MS=60000`).
 - Work against stubs while the other parts are not ready: fake JSON for the pages, a fixed answer instead of QVAC.
