@@ -291,6 +291,44 @@ $('#dev-chat-form').addEventListener('submit', async (e) => {
   } catch (err) { messages[messages.length - 1] = { role: 'ai', text: `Sorry: ${err.message}` }; drawChat() }
 })
 
+// ---------- house documents → proposed rules (POST /api/devices/documents) ----------
+// The hub's AI reads the document and proposes { deviceId, rule, text }; the host ticks the ones to keep;
+// each device gets its new rules through /apply (validated by the hub, new version).
+$('#open-docs').onclick = () => { fill($('#doc-out'), ); show('docs') }
+$('#doc-file').addEventListener('change', async (e) => { const f = e.target.files?.[0]; if (f && f.size < 200_000) $('#doc-text').value = await f.text() })
+$('#doc-read').onclick = async () => {
+  const text = $('#doc-text').value.trim(); if (!text) return
+  if (example()) { fill($('#doc-out'), el('div', { class: 'notice' }, 'This page is showing example data. Tap "+ Add hub" to read documents with the hub\'s AI.')); return }
+  fill($('#doc-out'), el('p', { class: 'small muted' }, 'The hub\'s AI is reading the document…'))
+  const h = hub()
+  try {
+    const props = await call(h.url + '/api/devices/documents', { key: h.key, body: { text } })
+    if (!props.length) { fill($('#doc-out'), el('div', { class: 'notice' }, 'No rule found for your devices in this document.')); return }
+    const boxes = props.map((p, i) => {
+      const d = h.devices.find((x) => x.id === p.deviceId)
+      const same = (r) => JSON.stringify({ when: r.when, do: r.do }) === JSON.stringify({ when: p.rule.when, do: p.rule.do })
+      const already = !!d && (d.rules || []).some(same)
+      return { p, d, already, input: el('input', { type: 'checkbox', id: `doc-r${i}`, checked: !already, disabled: already }) }
+    }).filter((b) => b.d)
+    fill($('#doc-out'), el('div', { class: 'card' },
+      el('span', { class: 'label' }, 'Proposed rules'),
+      ...boxes.map((b, i) => el('label', { class: 'row', for: `doc-r${i}` }, b.input, el('span', { 'aria-hidden': 'true' }, b.d.icon || '🧩'),
+        el('div', { class: 'grow' }, el('strong', {}, b.d.name), el('div', { class: 'small' }, ruleText(b.p.rule) + (b.already ? ' (already set)' : '')), b.p.text ? el('div', { class: 'small muted' }, `“${b.p.text}”`) : null))),
+      el('button', { class: 'btn primary block', type: 'button', on: { click: async () => {
+        const chosen = boxes.filter((b) => b.input.checked && !b.already)
+        if (!chosen.length) return
+        try {
+          for (const d of [...new Set(chosen.map((b) => b.d))]) {
+            const { state: _s, earned: _e, uses: _u, basePrice: _b, lastTriggered: _l, ...cfg } = d
+            const rules = [...(cfg.rules || []), ...chosen.filter((b) => b.d === d).map((b) => b.p.rule)]
+            await call(`${h.url}/api/devices/${encodeURIComponent(d.id)}/apply`, { key: h.key, body: { config: { ...cfg, rules } } })
+          }
+          fill($('#doc-out'), el('div', { class: 'notice ok' }, `${chosen.length} rule${chosen.length === 1 ? '' : 's'} added.`)); await refresh()
+        } catch (err) { $('#doc-out').append(el('div', { class: 'notice bad' }, err.message)) }
+      } } }, 'Add the selected rules')))
+  } catch (err) { fill($('#doc-out'), el('div', { class: 'notice bad' }, err.message)) }
+}
+
 // ---------- hubs and wallets ----------
 $('#add-hub-form').addEventListener('submit', async (e) => {
   e.preventDefault()

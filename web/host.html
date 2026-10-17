@@ -39,6 +39,7 @@
     <div class="row"><h2 class="grow" id="dev-title-home">Your devices</h2></div>
     <div class="grid" id="devices"></div>
     <button class="btn block" id="add-device" type="button">+ Add device</button>
+    <button class="btn block" id="open-docs" type="button">📄 Rules from a house document</button>
   </section>
 </main>
 
@@ -53,6 +54,22 @@
       <button class="btn primary" type="submit">Connect</button>
       <div id="add-wallet-msg"></div>
     </form>
+  </div>
+</section>
+
+<!-- House documents → rules (hub AI, nothing saved until applied) -->
+<section class="sheet" id="docs" hidden aria-labelledby="docs-title">
+  <div class="app">
+    <div class="row"><button class="icon-btn" data-close type="button" aria-label="Back">‹</button><h2 class="grow" id="docs-title">Rules from a document</h2></div>
+    <div class="card">
+      <p class="small">Paste your house rules, the rental contract or an appliance manual. The hub's local AI reads it and proposes rules for your devices. The document never leaves the hub.</p>
+      <label class="label" for="doc-file">Upload a text file</label>
+      <input id="doc-file" type="file" accept=".txt,.md,text/plain,text/markdown">
+      <label class="label" for="doc-text">Or paste the text</label>
+      <textarea id="doc-text" class="input" rows="8" placeholder="Quiet hours from 22:00. The washing machine needs maintenance every 50 washes…"></textarea>
+      <button class="btn primary" id="doc-read" type="button">Propose rules</button>
+    </div>
+    <div id="doc-out" class="stack"></div>
   </div>
 </section>
 

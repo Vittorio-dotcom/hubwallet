@@ -328,6 +328,7 @@ async function pay (h, s) {
     }
   } catch (e) { track(0, e.message, 'bad') } finally {
     busy = false
+    await walletApi('/api/me?fresh=1').catch(() => {}) // the wallet caches balances for 30 s: force a fresh one after paying
     await refresh()
     const fresh = hubs.find((x) => x.url === h.url)?.services.find((x) => x.id === s.id)
     if (fresh && !$('#device').hidden) renderDevice(h, fresh)
