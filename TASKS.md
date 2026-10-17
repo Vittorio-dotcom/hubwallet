@@ -1,67 +1,84 @@
-# TASKS — team AVL (reset on Saturday 17 October, after the plan in `docs/PLAN.md`)
+# TASKS — team AVL (final, aligned with `docs/PLAN.md` of Saturday midday)
 
-Development restarts here, following the agreed plan (architecture C: user wallet, host signer, watch-only hubs).
-Update the status when you start (`doing`) and finish (`done`). `git pull --no-rebase` before editing, push right after.
-Deadline: last commit on `main` by **Sunday 18 October, 13:00**. Full demo rehearsed by **Sunday 11:00**.
+`docs/PLAN.md` is the source of truth for *what* and *how*; this file says *who* and *when*.
+Update the status when you start (`doing`) and finish (`done`). `git pull --no-rebase` → small commit → `git push`, every 20–30 min.
+Commit prefixes: `hub:` `wallet:` `signer:` `web:` `ai:`. No rebase, no amend, no force-push. Never commit `data/`, seeds, keys, `.env`.
+Task numbers 17, 24, 25 and 26 are referenced by the plan: keep them.
 
-Kept from the morning: `src/wallet.js` (to be rewritten for C), `src/ai.js` + `prompts/` (Lapo), the funded demo
-wallets in `data/` (not in git). Removed: the first hub, guest and web code.
-
-## Owners and boundaries
-| Who | Owns | Area |
+## Owners (only the owner edits these files)
+| Who | Area | Files |
 |---|---|---|
-| **Vittorio's Claude** (demo PC, wallets live there) | `src/wallet.js`, `src/signer.js`, `src/hub.js`, `src/guest.js` | RGB core with architecture C, hub API, wiring of AI and behaviours into the hub |
-| **Alessandro** | `src/behaviours.js`, `src/supplier.js`, `test/` | Device functions engine, supplier wallet and restock, end-to-end tests, hub B setup, backups |
-| **Lapo** | `src/ai.js`, `prompts/`, `README.md` | Local AI: plug-and-play, house documents, onboarding plan; final README; questions to mentors |
-| **Vittorio** | `web/` | Host app, signer page (host's phone), guest app, device pages |
+| **Alessandro** | Everything that moves money: wallets, signer, hub, guest, behaviours, scripts, hub B, sweeps, backups, final README | `src/wallet.js` `src/signer.js` `src/hub.js` `src/guest.js` `src/behaviours.js` `scripts/` `README.md` |
+| **Lapo** | Local AI (QVAC): service/behaviour/bundle, plug-and-play, house documents; the AI routes inside `hub.js` | `src/ai.js` `prompts/` (+ the `/api/ai/*` block in `hub.js`, agreed with Alessandro) |
+| **Vittorio** (with his Claude) | Interfaces: host app with "To sign", guest app, device pages; pitch | `web/` |
 
-## Interfaces between the parts (agree here before coding against them)
-- **Hub API**: written in `CLAUDE.md` by Vittorio's Claude as the routes are built. Vittorio builds `web/` against it.
-- **Behaviours** (`src/behaviours.js`, Alessandro): a pure module, no wallet access.
-  `export function evaluate(hubState, now) → actions[]`, where an action is one of
-  `{ kind: 'propose_purchase', serviceId, to: 'supplier', amount, reason }` · `{ kind: 'set_price', serviceId, price }` ·
-  `{ kind: 'lock' | 'unlock', serviceId }` · `{ kind: 'keep_deposit', orderId, amount }` · `{ kind: 'notify', text }`.
-  The hub calls it on every tick and executes the actions (spending actions go to "To sign").
-- **AI** (`src/ai.js`, Lapo): functions return JSON only, validated by the caller; the hub exposes them as `/api/ai/*`.
-- **Signer** (`src/signer.js`): holds the hubs' seeds (the host's phone). The hub sends `{ id, summary, psbt }`,
-  the signer shows the summary, the host approves, the signer returns the signed PSBT.
+## Milestones (plan section 7)
+| When | Goal |
+|---|---|
+| **Sat 15:00** | `WatchWallet` + `signer.js` in the repo; hub A runs watch-only; one key sent through "To sign" |
+| **Sat 18:00** | Core real: door (key), washing machine (pay per use), bike (rental + lock), with the pages |
+| **Sat evening** | Behaviours engine + restock → supplier (signed); AI host panel wired |
+| **Sun 10:00** | Hub B + same guest on both; sweep; plug-and-play from descriptor; one assistant question |
+| **Sun 11:00** | **Feature freeze.** Full demo rehearsed; drop what does not work |
+| Sun 12:00 | Final README |
+| **Sun 13:00** | **Last commit on `main`** |
 
 ## Board
-| # | Task | Owner | Status |
+
+### Alessandro — money path (plan sections 1, 2, 4, 5)
+| # | Task | Plan | Due | Status |
+|---|---|---|---|---|
+| 26 | `wallet.js`: `Wallet` (seed, WDK) + `WatchWallet` (xpubs, rgb-sdk) with `prepareSend` / `prepareUtxos` / `finish`; `signer.js` `init` + `watch` | 1, 2.1, 2.4 | Sat 15:00 | todo |
+| 1 | `hub.js`: services (access/use/rent), orders, payment watcher, `fulfil`, device state; serves `web/` | 2.5 | Sat 15:00 | todo |
+| 2 | "To sign" queue + routes `GET /api/to-sign`, `POST /api/to-sign/:id`, `/reject`, expiry 10 min, one prepared send at a time | 2.3, 6 | Sat 15:00 | todo |
+| 3 | Flow B: stay key issued by the hub, sent after signature; door check-in session until `to` | 2.6 B | Sat 15:00 | todo |
+| 4 | Flow A: pay per use (washing machine) | 2.6 A | Sat 18:00 | todo |
+| 5 | Flow C: rental (bike), lock when time is up | 2.6 C | Sat 18:00 | todo |
+| 6 | `guest.js` (guest, and supplier with `WALLET=supplier`) | 1 | Sat 18:00 | todo |
+| 7 | `scripts/` demo setup: signer init, funding, UTXOs via signer, HUSD, guest funds | 2.9 | Sat 18:00 | todo |
+| 8 | `behaviours.js`: `evaluate(event, state)`, triggers and actions, `effectivePrice`, `lastTriggered` | 4 | Sat evening | todo |
+| 9 | Flow D: restock → supplier, approved = signed | 2.6 D | Sat evening | todo |
+| 10 | Flow E: sweep earnings to the host's personal wallet | 2.6 E | Sun 10:00 | todo |
+| 11 | Hub B ("Cortile", :8081), same guest uses both | 5 | Sun 10:00 | todo |
+| 24 | Privacy: no guest name stored (optional label or nothing) | 2.8 | Sat evening | todo |
+| 25 | Encrypted backup of hub stashes and signer seeds, outside the repo | 2.8 | Sat evening | todo |
+| 12 | Final README: how to run, real vs simulated, third-party tools, prior work (WDK feasibility test, UI mockup) | 7 | Sun 12:00 | todo |
+
+### Lapo — local AI (plan section 3)
+| # | Task | Plan | Due | Status |
+|---|---|---|---|---|
+| 13 | QVAC server + `src/ai.js`: text → service, behaviour, bundle | 3c | — | done |
+| 14 | `/api/ai/*` routes in `hub.js` (service, behaviour: owner; bundle: public), agreed with Alessandro | 6 | Sat evening | todo |
+| 15 | Plug-and-play: device descriptor → proposed service + behaviours | 3a | Sun 10:00 | todo |
+| 16 | House documents: contract → proposed behaviours; guest questions answered from the documents (RAG) | 3b | Sun 10:00 | todo |
+| 17 | Questions to mentors: QVAC on another LAN machine counts as on-device? WDK bonus with watch-only hubs? 0-conf unlock? | 0-bis | Sat 15:00 | todo |
+| 18 | Decide where QVAC runs in the demo (demo PC or Lapo's GPU PC) and measure answer time there | 0-bis | Sat 18:00 | todo |
+
+### Vittorio — interfaces (pages call the HTTP API of plan section 6 and `CLAUDE.md`)
+| # | Task | Plan | Due | Status |
+|---|---|---|---|---|
+| 19 | Host app: services, stays (send key → goes to "To sign"), proposals inbox, earnings, activity log with explorer links | 2.6, 6 | Sat 18:00 | todo |
+| 20 | "To sign" view in the host app: pending items with summary, approve / reject (the signer signs) | 2.3 | Sat 18:00 | todo |
+| 21 | Guest app (rebuild): my key, my HUSD, services of the hub (QR link), order → pay → live status | 2.6 A–C | Sat 18:00 | todo |
+| 22 | Device pages: big state, countdown, device functions with `lastTriggered`, QR to the guest app | 4 | Sat evening | todo |
+| 23 | Host AI panel: create services/behaviours by text, add a device by descriptor, upload documents | 3 | Sun 10:00 | todo |
+| 27 | "Ask the home" box in the guest app (calls `/api/ai/bundle`) | 3 | Sun 10:00 | todo |
+
+### Everyone
+| # | Task | Who | Due | Status |
+|---|---|---|---|---|
+| 28 | Choose the demo PC (Vittorio's Linux or Alessandro's Mac) and rehearse the full demo there | all | Sun 11:00 | todo |
+| 29 | Pitch (5 min), demo script, answers to likely questions | Vittorio + Lapo | Sun 12:00 | todo |
+
+### Stretch (only after the Sunday 10:00 milestone)
+| # | Task | Who | Status |
 |---|---|---|---|
-| **Core RGB (architecture C)** | | | |
-| 1 | `wallet.js` for C: watch-only hub wallet (xpubs + RGB stash) and full wallet for guest/signer; prepare (PSBT) / finish split | Vittorio's Claude | todo |
-| 2 | `signer.js`: host signer server, one seed per hub, pending requests, approve = sign, reject | Vittorio's Claude | todo |
-| 3 | `hub.js`: services (access / use / rent), orders, payment watcher (asset + amount check), device state, no guest identity stored | Vittorio's Claude | todo |
-| 4 | Stay keys: hub issues the key, the transfer to the guest waits for the host's signature | Vittorio's Claude | todo |
-| 5 | `guest.js`: the guest's own wallet (localhost), receive, pay, refresh | Vittorio's Claude | todo |
-| 6 | Hub routes for AI (`/api/ai/*`) and behaviours tick wired in | Vittorio's Claude | todo |
-| 7 | Migrate the demo: hub A and hub B as watch-only, seeds moved to the signer, HUSD and guest funds in place | Vittorio's Claude | todo |
-| **Device functions** | | | |
-| 8 | `behaviours.js` with the `evaluate()` interface above: stock below, after hour (lock), weekday price, overdue rental (keep deposit), maintenance counter, notify | Alessandro | todo |
-| 9 | Supplier wallet (`supplier.js` or a guest-type wallet) receiving restock payments | Alessandro | todo |
-| 10 | End-to-end tests against the running hub: door, washing machine, bike (expiry), restock signed and paid | Alessandro | todo |
-| 11 | Hub B services (e.g. charging station, laundry) and its setup script | Alessandro | todo |
-| 12 | Encrypted backup of the demo wallets (Saturday evening, outside the repo) | Alessandro | todo |
-| **Local AI** | | | |
-| 13 | Plug-and-play: device descriptor JSON → proposed service + behaviours (stretch: label photo with vision) | Lapo | todo |
-| 14 | House documents: contract/rules/manual → proposed behaviours; guest questions answered from the documents (RAG) | Lapo | todo |
-| 15 | Host onboarding plan: "create the hub of X with …" → setup plan JSON (services, behaviours), code executes after confirmation | Lapo | todo |
-| 16 | Host report: earnings and incidents per device, in plain language | Lapo | later |
-| **Interfaces** | | | |
-| 17 | Host app: services, add device (plug-and-play), documents, stays (send key), proposals, activity log with explorer links | Vittorio | todo |
-| 18 | Signer page (host's phone): pending requests with a readable summary, approve = sign | Vittorio | todo |
-| 19 | Guest app: my key, my HUSD, services of the hub (QR link), order → pay → live status, "ask the home" | Vittorio | todo |
-| 20 | Device pages: big state, countdown, functions of the device, QR to the guest app | Vittorio | todo |
-| **Submission** | | | |
-| 21 | Final README: how to run, real vs simulated, third-party tools, prior work (declare the WDK feasibility test and the UI mockup) | Lapo | todo |
-| 22 | Questions to mentors: 0-conf unlock, WDK bonus with watch-only hubs, AI on another LAN machine | Lapo | todo |
-| 23 | Pitch (5 min), demo script, answers to likely questions | Vittorio + Lapo | todo |
-| **Stretch** | | | |
-| 24 | Device-to-device payment between hub A and hub B, auto-signed within signer limits | Vittorio's Claude + Alessandro | later |
-| 25 | Raspberry/ESP32 device driven by the hub | — | later |
+| 30 | Device-to-device payment hub A → hub B, auto-signed within signer limits | Alessandro | later |
+| 31 | Plug-and-play from a photo of the device label (vision) | Lapo | later |
+| 32 | Host report: earnings and incidents per device | Lapo | later |
+| 33 | Raspberry/ESP32 device driven by the hub | — | later |
 
 ## Notes
-- Demo PC (Vittorio): `192.168.7.246`. AI server (Lapo): `http://192.168.6.169:11434`, ~1–2 s per answer.
+- Demo PC (Vittorio, Linux): `192.168.7.246`. AI server (Lapo, GPU): `http://192.168.6.169:11434`, ~1–2 s per answer.
 - Demo rental hour = 1 minute (`HOUR_MS=60000`).
-- Never commit `data/`, seeds, keys or `.env`.
+- Work against stubs while the other parts are not ready: fake JSON for the pages, a fixed answer instead of QVAC.
