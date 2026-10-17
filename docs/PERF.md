@@ -45,8 +45,38 @@ All calls of one wallet share one queue. A 0 ms call waits behind a 10–25 s sy
 - guest taps a machine → `requestPayment` (witness invoice, 0 ms) waits for the host page's `/api/wallet` sync;
 - guest `/api/check` → `decodeInvoice` (0 ms) waits for its own `/api/me` sync.
 
-## Fix plan (on this branch)
-1. **Reads without sync** (small, low risk): `balance()` / `unspents()` call rgb-lib with
+## 4. The watcher was late after the block (payments 50–150 s)
+Today's real payments (hub-state.json + block_time on the indexer): block after ~35 s on average,
+hub said "paid" ~40 s later (11–89 s). Two causes: the burst checked only at 0/35/70/120 s, and the
+refresh waited in the queue behind balance syncs (hub-demo, with the host page open: 25–89 s late;
+hub-a without it: 11–16 s). Inside rgb-lib, settling a witness payment also runs two indexer syncs
+(`wait_confirmations` → `sync_db_txos` when `skip_sync` is false: ~30 s on a tiny wallet).
+
+## Done on this branch (tested with real payments, guest-marta → hub-a on ports 8190/8180)
+1. `balance()` / `unspents()` read the local database (`skipSync = true`): **15–30 ms** instead of 10–25 s.
+2. Explicit `sync()` only at start-up, 20 s after a burst, on manual refresh (`POST /api/refresh`), after a guest payment burst.
+3. Hub watcher after a claim: refresh every 5 s until the payment settles (max 3 min).
+4. Fast refresh (`skip_sync = true`) while only incoming payments are followed. Safe: the witness txo is
+   written to the database when the consignment is accepted (rgb-lib online.rs, `pending_witness`).
+   Spends (signed PSBTs) keep the full refresh.
+5. An unpaid invoice stays `waiting` (rgb-lib also calls it WaitingCounterparty; the guest refused to pay it).
+
+Results: order + check + send **~1 s** (was 10–30 s when queued behind syncs). Paid after the block:
+12 s and 31 s in the clean runs (was 25–89 s on hub-demo); what remains is rgb-lib's client-side
+validation (one or two rounds of ~10–13 s after "Getting TX height"), which must stay.
+Still blocking: the syncs themselves (start-up, end of burst, ~10–25 s) and the validation → worker thread (step below).
+
+## Incident during the test (my mistake, repaired)
+A test hub was started twice on the same wallet (the first one did not listen yet: at start-up the
+hub binds its port only after the first rgb-lib calls, 20–40 s). Both appended to
+`bdk_db_watch_only` (bdk file store: no locking) → truncated entry → "bincode error … failed to fill
+whole buffer" at the next start. The RGB stash (`rgb/*.dat`, `rgb_lib_db`) was intact.
+Repair, tried first on a copy: move `bdk_db_watch_only` aside, start, sync → consistency check passes,
+same BTC balance, assets and UTXOs. Corrupt file kept as `data/hub-a/bdk_db_watch_only.corrupt-2026-10-18`.
+Lesson: before starting a wallet, check the PROCESS (pgrep + WALLET env), not the port.
+
+## Next (optional)
+1. ~~Reads without sync~~ (done, see above): `balance()` / `unspents()` call rgb-lib with
    `skipSync = true` (`manager.client.wallet.getBtcBalance(online, true)`,
    `listUnspents(online, false, true)`; guest: `account._wallet.client.wallet`).
    One explicit `sync` only when the numbers can change: end of a payment/refresh burst, after a send,
