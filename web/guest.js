@@ -156,10 +156,12 @@ function render () {
   $('#moves').replaceChildren(...(tr.length
     ? [...tr].sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0)).map((t) => {
         const amt = (t.assignments || []).reduce((s, a) => s + Number(a.Fungible || 0), 0) || Number(t.requestedAssignment?.Fungible || 0)
-        const incoming = String(t.kind).startsWith('Receive') || t.kind === 'Issuance'
+        const kind = typeof t.kind === 'number' ? ['Issuance', 'ReceiveBlind', 'ReceiveWitness', 'Send', 'Inflation'][t.kind] : t.kind
+        const status = typeof t.status === 'number' ? ['WaitingCounterparty', 'WaitingConfirmations', 'Settled', 'Failed'][t.status] : t.status
+        const incoming = String(kind).startsWith('Receive') || kind === 'Issuance'
         const when = t.createdAt ? new Date(t.createdAt * 1000).toLocaleString('en', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' }) : ''
         return el('div', {}, el('span', { 'aria-hidden': 'true' }, incoming ? '↓' : '↑'),
-          el('div', { class: 'grow' }, el('div', {}, incoming ? 'Received' : 'Sent'), el('div', { class: 'small muted' }, `${when} · ${t.status}`)),
+          el('div', { class: 'grow' }, el('div', {}, incoming ? 'Received' : 'Sent'), el('div', { class: 'small muted' }, `${when} · ${status}`)),
           el('span', { class: 'mono' }, money(amt)),
           t.txid ? el('a', { href: 'https://mutinynet.com/tx/' + t.txid, target: '_blank', rel: 'noopener', class: 'small' }, 'tx') : null)
       })
@@ -221,10 +223,11 @@ $('#search-form').addEventListener('submit', async (e) => {
   query = ''
   $('#search-out').replaceChildren(el('p', { class: 'small muted' }, `Looking for a hub at ${url}…`))
   try {
-    const h = await api(url + '/api/services')
+    const info = await api(url + '/api/hub/info') // public: { name, network, hubKey }
+    const h = await api(url + '/api/services').catch(() => ({ services: [] }))
     $('#search-out').replaceChildren(el('div', { class: 'card' },
-      el('span', { class: 'label' }, 'Hub found'), el('strong', {}, h.name || 'Unnamed hub'), el('span', { class: 'mono small' }, url),
-      el('span', { class: 'small muted' }, `${(h.services || []).length} devices`),
+      el('span', { class: 'label' }, 'Hub found'), el('strong', {}, info.name || 'Unnamed hub'), el('span', { class: 'mono small' }, url),
+      el('span', { class: 'small muted' }, `${(h.services || []).length} devices · network ${info.network || '?'}`),
       hubUrls.includes(url) ? el('span', { class: 'small' }, 'Already connected.')
         : el('button', { class: 'btn primary', type: 'button', on: { click: () => addHub(url) } }, 'Connect to this hub')))
   } catch { $('#search-out').replaceChildren(el('div', { class: 'notice bad' }, `No hub answers at ${url}.`)) }
@@ -273,6 +276,13 @@ function track (step, msg, cls, link) {
   $('#track-msg').replaceChildren(msg ? el('div', { class: `notice ${cls || ''}` }, msg) : '')
   $('#track-link').replaceChildren(link && /^https:\/\//.test(link) ? el('a', { href: link, target: '_blank', rel: 'noopener', class: 'small' }, 'See the transaction on the explorer') : '')
 }
+// Payment flow of API_usage.md §4 (payer wallet = src/guest.js):
+//   1. the hub creates the payment request (service layer: POST /api/services/:id/order → id = payment id)
+//   2. /api/check: the WALLET decodes the hub's RGB invoice itself and returns what would be paid. Nothing is signed.
+//   3. the guest confirms exactly that (description, amount, hub)
+//   4. /api/pay-request with `expect`: if the hub changed anything, the wallet refuses
+//   5. follow the public GET <hub>/api/payments/:id until 'paid', then keep the hub's signed receipt (/api/proof)
+const FINAL_BAD = { underpaid: 'The hub received less than asked.', failed: 'The transfer failed.', expired: 'The payment request expired.', wrong_asset: 'The hub received a different asset.' }
 async function pay (h, s) {
   busy = true; renderDevice(h, s)
   try {
@@ -280,21 +290,32 @@ async function pay (h, s) {
       for (let i = 0; i <= 3; i++) { track(i, 'Example data: nothing is really paid.'); await new Promise((r) => setTimeout(r, 900)) }
       track(4, `${s.name} started.`, 'ok'); return
     }
-    const body = s.type === 'rent' ? { hours } : {}
-    track(0, 'Asking the hub for an invoice…')
-    const order = await api(`${h.url}/api/services/${encodeURIComponent(s.id)}/order`, body)
-    // Pay only what the screen showed: the dollar this wallet holds, and the shown amount.
-    const expected = { assetId: dollar()?.assetId, amount: s.price * (s.type === 'rent' ? hours : 1) }
-    if (!expected.assetId || order.assetId !== expected.assetId || order.amount !== expected.amount) throw new Error('The hub asked for a different amount or asset than shown. Nothing was paid.')
-    track(1, `Paying ${money(order.amount)} ${DOLLAR}…`)
-    const paid = await walletApi('/api/pay', { invoice: order.invoice, assetId: order.assetId, amount: order.amount })
+    track(0, 'Asking the hub for a payment request…')
+    const order = await api(`${h.url}/api/services/${encodeURIComponent(s.id)}/order`, s.type === 'rent' ? { hours } : {})
+    const paymentId = order.id
+    // 2. what the wallet itself reads in the hub's invoice
+    const c = await walletApi('/api/check', { hubUrl: h.url, paymentId })
+    const shown = s.price * (s.type === 'rent' ? hours : 1)
+    if (c.amount !== shown || c.assetId !== dollar()?.assetId) throw new Error(`The hub asks for ${money(c.amount)} instead of ${money(shown)} ${DOLLAR}, or for another asset. Nothing was paid.`)
+    // 3. explicit confirmation of what the wallet checked
+    const ok = await confirmPay(c, h)
+    if (!ok) { track(0, 'Payment cancelled. Nothing was paid.'); return }
+    track(1, `Paying ${money(c.amount)} ${DOLLAR}…`)
+    // 4. pay exactly what was confirmed
+    const paid = await walletApi('/api/pay-request', { hubUrl: h.url, paymentId, expect: { assetId: c.assetId, amount: c.amount } })
     track(2, 'Sent. The hub checks it on Bitcoin: about a minute.', '', paid.link)
+    // 5. follow the hub's public payment record
     for (let i = 0; i < 60; i++) {
-      await new Promise((r) => setTimeout(r, 4000))
-      if (i % 3 === 0) walletApi('/api/refresh', {}).catch(() => {})
-      const o = await api(`${h.url}/api/orders/${encodeURIComponent(order.id)}`)
-      if (o.status === 'paid') { track(4, s.type === 'rent' ? `${s.name} is yours for ${hours} h.` : `${s.name} started.`, 'ok', paid.link); break }
-      if (['failed', 'underpaid', 'expired'].includes(o.status)) { track(2, 'The hub did not accept this payment. Nothing was started.', 'bad', paid.link); break }
+      await new Promise((r) => setTimeout(r, 5000))
+      if (i % 2 === 0) walletApi('/api/refresh', {}).catch(() => {})
+      const p = await api(`${h.url}/api/payments/${encodeURIComponent(paymentId)}`)
+      if (p.status === 'paid') {
+        let receipt = ''
+        try { const pr = await walletApi(`/api/proof?hubUrl=${encodeURIComponent(h.url)}&paymentId=${encodeURIComponent(paymentId)}`); receipt = pr.valid ? ' Receipt signed by the hub and saved in your wallet.' : '' } catch {}
+        track(4, `${s.name} started.${receipt}`, 'ok', p.link || paid.link)
+        break
+      }
+      if (FINAL_BAD[p.status]) { track(2, FINAL_BAD[p.status] + ' Nothing was started.', 'bad', p.link || paid.link); break }
     }
   } catch (e) { track(0, e.message, 'bad') } finally {
     busy = false
@@ -302,6 +323,21 @@ async function pay (h, s) {
     const fresh = hubs.find((x) => x.url === h.url)?.services.find((x) => x.id === s.id)
     if (fresh && !$('#device').hidden) renderDevice(h, fresh)
   }
+}
+
+// In-page confirmation (browser confirm() dialogs are not used): resolves true/false.
+function confirmPay (c, h) {
+  return new Promise((resolve) => {
+    $('#track').hidden = false
+    $('#track-msg').replaceChildren(el('div', { class: 'card' },
+      el('span', { class: 'label' }, 'Checked by your wallet'),
+      el('strong', {}, `Pay ${money(c.amount)} ${DOLLAR} to ${c.hub || h.name}`),
+      el('span', { class: 'small' }, c.description || ''),
+      el('span', { class: 'small muted mono' }, `Asset ${c.assetId}`),
+      el('div', { class: 'row' },
+        el('button', { class: 'btn primary', type: 'button', on: { click: () => resolve(true) } }, 'Confirm and pay'),
+        el('button', { class: 'btn', type: 'button', on: { click: () => resolve(false) } }, 'Cancel'))))
+  })
 }
 
 // served by a wallet service? use it as the first wallet

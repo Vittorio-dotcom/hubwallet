@@ -117,3 +117,18 @@ textarea.input { resize: vertical; font-family: var(--mono); font-size: 13px }
 .diff li.del { background: var(--bad-soft); color: var(--bad) }
 .diff li.mod { background: var(--warn-soft); color: var(--warn) }
 details summary { cursor: pointer }
+
+/* device screen: big, readable from a distance */
+.device-body .app { max-width: 520px }
+.dev-state { border-radius: 24px; padding: 28px 20px; text-align: center; display: flex; flex-direction: column; align-items: center; gap: 8px; border: 2px solid var(--line); background: var(--surface) }
+.dev-state.running { border-color: var(--ok); background: var(--ok-soft) }
+.dev-state.locked { border-color: var(--bad); background: var(--bad-soft) }
+.dev-icon { font-size: 84px; line-height: 1 }
+.dev-state h1 { font-size: 28px }
+.dev-status { font-size: 22px; font-weight: 700; text-transform: uppercase; letter-spacing: .06em }
+.dev-state.running .dev-status { color: var(--ok) } .dev-state.locked .dev-status { color: var(--bad) }
+.dev-timer { font-size: 56px; font-weight: 700; font-variant-numeric: tabular-nums; color: var(--ok) }
+.dev-price { font-size: 20px; font-weight: 600 }
+.qr-card { flex-direction: row; align-items: center; gap: 16px }
+.qr-card #qr { background: #fff; padding: 8px; border-radius: 12px; flex: none }
+@media (prefers-reduced-motion: no-preference) { .dev-state.running .dev-icon { animation: spin 3s linear infinite } @keyframes spin { to { transform: rotate(360deg) } } }
