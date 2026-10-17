@@ -292,6 +292,17 @@ function track (step, msg, cls, link) {
 //   4. /api/pay-request with `expect`: if the hub changed anything, the wallet refuses
 //   5. follow the public GET <hub>/api/payments/:id until 'paid', then keep the hub's signed receipt (/api/proof)
 const FINAL_BAD = { underpaid: 'The hub received less than asked.', failed: 'The transfer failed.', expired: 'The payment request expired.', wrong_asset: 'The hub received a different asset.' }
+// rgb-lib errors in words the guest understands, with what to do.
+function friendly (msg) {
+  const m = String(msg || '')
+  if (/InsufficientAssignments/.test(m)) return { text: 'Your dollars are still settling from your last payment. Try again in about a minute.' }
+  if (/InsufficientAllocationSlots|AllocationsAlreadyAvailable/.test(m)) return { text: 'Your wallet needs to prepare new slots to hold dollars (a small Bitcoin transaction, about a minute).', prepare: true }
+  if (/InsufficientBitcoins/.test(m)) return { text: 'Your wallet has too little bitcoin to pay the network fee. Add some sats to your address (Wallet › Address).' }
+  return { text: m }
+}
+async function prepareWallet () {
+  try { await walletApi('/api/utxos', { num: 8 }); track(0, 'Preparing your wallet: try paying again in about a minute.', 'ok') } catch (e) { track(0, friendly(e.message).text, 'bad') }
+}
 async function pay (h, s) {
   busy = true; renderDevice(h, s)
   try {
@@ -326,7 +337,11 @@ async function pay (h, s) {
       }
       if (FINAL_BAD[p.status]) { track(2, FINAL_BAD[p.status] + ' Nothing was started.', 'bad', p.link || paid.link); break }
     }
-  } catch (e) { track(0, e.message, 'bad') } finally {
+  } catch (e) {
+    const f = friendly(e.message)
+    track(0, f.text, 'bad')
+    if (f.prepare) $('#track-msg').append(el('button', { class: 'btn', type: 'button', on: { click: prepareWallet } }, 'Prepare my wallet'))
+  } finally {
     busy = false
     await walletApi('/api/me?fresh=1').catch(() => {}) // the wallet caches balances for 30 s: force a fresh one after paying
     await refresh()
