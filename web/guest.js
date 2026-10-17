@@ -7,9 +7,14 @@
 const $ = (s) => document.querySelector(s)
 const money = (cents) => (Number(cents || 0) / 100).toFixed(2)
 const qs = new URLSearchParams(location.search)
+// Trusted hubs are remembered on this device. Hubs arriving from a link (QR) are only *offered*:
+// the guest sees the full address and must confirm before their devices are listed.
+const parse = (v) => String(v || '').split(',').map((h) => h.trim().replace(/\/$/, '')).filter((h) => /^https?:\/\/[^/]+$/.test(h))
 const stored = (() => { try { return localStorage.getItem('hubs') } catch { return null } })()
-const HUBS = (qs.get('hubs') || stored || 'http://localhost:8080').split(',').map((h) => h.trim().replace(/\/$/, '')).filter(Boolean)
-try { localStorage.setItem('hubs', HUBS.join(',')) } catch {}
+let HUBS = parse(stored)
+if (!HUBS.length && !qs.get('hubs')) HUBS = ['http://localhost:8080']
+let offered = parse(qs.get('hubs')).filter((h) => !HUBS.includes(h))
+const saveHubs = () => { try { localStorage.setItem('hubs', HUBS.join(',')) } catch {} }
 const DOLLAR = 'HUSD'
 
 // ---------- small DOM helper: builds elements with text only (no HTML injection) ----------
@@ -75,6 +80,7 @@ async function load () {
 
 const dollar = () => (me?.assets?.nia || []).find((a) => a.ticker === DOLLAR)
 const keys = () => (me?.assets?.nia || []).filter((a) => a.ticker.startsWith('STAY') && a.balance.spendable > 0)
+const keyFor = (h) => keys().find((k) => String(k.name || '').toLowerCase().startsWith(String(h.name || '').toLowerCase()))
 const KIND = { access: 'Access', use: 'Pay per use', rent: 'Rental' }
 
 function stateOf (s) {
@@ -91,6 +97,13 @@ function priceText (s) {
 
 function render () {
   $('#demo-tag').hidden = !demo
+  $('#offer').replaceChildren(...offered.map((url) => el('div', { class: 'card' },
+    el('span', { class: 'label' }, 'New hub from a link'),
+    el('span', { class: 'mono' }, url),
+    el('p', { class: 'small muted' }, 'Connect only if you are in front of this hub (for example you scanned its QR code).'),
+    el('div', { class: 'row' },
+      el('button', { class: 'btn primary', type: 'button', on: { click: () => { HUBS.push(url); offered = offered.filter((x) => x !== url); saveHubs(); load() } } }, 'Connect'),
+      el('button', { class: 'btn', type: 'button', on: { click: () => { offered = offered.filter((x) => x !== url); render() } } }, 'Ignore')))))
   $('#amount').textContent = money(dollar()?.balance.spendable || 0)
   $('#unit').textContent = DOLLAR
   const k = keys().length
@@ -160,7 +173,7 @@ function openDevice (h, s) {
 function renderDevice (h, s) {
   const [label, cls] = stateOf(s)
   const amount = s.type === 'rent' ? s.price * hours : s.price
-  const canPay = !busy && (s.type !== 'access' || keys().length > 0) && !['running', 'rented'].includes(s.device?.state)
+  const canPay = !busy && (s.type !== 'access' || !!keyFor(h)) && !['running', 'rented'].includes(s.device?.state)
   const action = s.type === 'access' ? 'Open with my key' : `Pay ${money(amount)} ${DOLLAR}`
   $('#dev-body').replaceChildren(
     el('div', { class: 'row' }, el('span', { style: 'font-size:40px', 'aria-hidden': 'true' }, s.icon || '🧩'),
@@ -170,7 +183,8 @@ function renderDevice (h, s) {
     s.type === 'rent' ? el('div', { class: 'hours', role: 'group', 'aria-label': 'Hours' },
       ...Array.from({ length: s.maxHours || 4 }, (_, i) => el('button', { type: 'button', 'aria-pressed': String(hours === i + 1), on: { click: () => { hours = i + 1; renderDevice(h, s) } } }, `${i + 1} h`))) : null,
     s.type !== 'access' ? el('div', { class: 'total' }, el('span', {}, 'Total'), el('span', {}, `${money(amount)} ${DOLLAR}`)) : null,
-    s.type === 'access' && !keys().length ? el('p', { class: 'small muted' }, 'You need the stay key from the host to open this door.') : null,
+    s.type === 'access' && !keyFor(h) ? el('p', { class: 'small muted' }, `You need a stay key issued by ${h.name} to open this door.`) : null,
+    el('p', { class: 'small muted mono' }, `Hub: ${demo ? 'example' : h.url}`),
     el('button', { class: 'btn primary block', type: 'button', disabled: !canPay, on: { click: () => pay(h, s) } }, action))
 }
 
@@ -190,7 +204,10 @@ async function pay (h, s) {
       track(4, s.type === 'access' ? 'The door is open.' : `${s.name} is yours.`, 'ok')
       return
     }
-    const body = s.type === 'access' ? { stayAssetId: keys()[0].assetId } : s.type === 'rent' ? { hours } : {}
+    // A key goes only to the hub that issued it: the key's name starts with that hub's name.
+    const key = s.type === 'access' ? keyFor(h) : null
+    if (s.type === 'access' && !key) throw new Error(`None of your keys was issued by ${h.name}. Nothing was sent.`)
+    const body = s.type === 'access' ? { stayAssetId: key.assetId } : s.type === 'rent' ? { hours } : {}
     track(0, 'Asking the hub for an invoice…')
     const order = await api(`${h.url}/api/services/${encodeURIComponent(s.id)}/order`, body)
     // Pay only what the screen showed: the right asset and the right amount.
