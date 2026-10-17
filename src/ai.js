@@ -52,7 +52,15 @@ const num = (x) => (typeof x === 'number' && Number.isFinite(x) ? x : null)
 const int = (x, min, max) => { x = num(x); return x === null ? null : Math.min(max, Math.max(min, Math.round(x))) }
 const cents = (dollars) => Math.min(100_000, Math.max(0, Math.round((num(dollars) || 0) * 100)))
 const str = (x, max) => (typeof x === 'string' && x.trim() ? x.trim().slice(0, max) : null)
-const listServices = (services) => services.map((s) => `${s.id}: ${s.name} (${s.type})`).join('\n')
+// Money guard: accept an amount from the model only if that number is written in the host's text
+// (small models copy numbers from the prompt examples). "20", "20.5" and "20,5" all match 20.5 / 20.
+function written (x, text) {
+  x = num(x)
+  if (x === null) return false
+  const numbers = (String(text).match(/\d+(?:[.,]\d+)?/g) || []).map((n) => Number(n.replace(',', '.')))
+  return numbers.includes(x)
+}
+const listServices =(services) => services.map((s) => `${s.id}: ${s.name} (${s.type})`).join('\n')
 function serviceIds (services) {
   const ids = (services || []).map((s) => String(s.id)).filter(Boolean)
   if (!ids.length) throw new Error('The hub has no services yet.')
@@ -66,24 +74,32 @@ const ICONS = {
 const TYPES = ['access', 'use', 'rent']
 const DAYS = ['mon', 'tue', 'wed', 'thu', 'fri', 'sat', 'sun']
 const TRIGGERS = ['stock_below', 'weekday', 'overdue', 'after_hour']
-const ACTIONS = ['propose_purchase', 'change_price', 'notify']
+// Same action names as src/behaviours.js (docs/PLAN.md section 4).
+const ACTIONS = ['propose_purchase', 'change_price', 'notify', 'lock', 'unlock', 'keep_deposit']
 const nullable = (type) => ({ type: [type, 'null'] })
 
 // ---------- text → service ----------
+// What the model fills for a service; the code turns it into the hub's service JSON (buildService).
+const SERVICE_FIELDS = {
+  name: { type: 'string' },
+  kind: { type: 'string', enum: Object.keys(ICONS) },
+  type: { type: 'string', enum: TYPES },
+  priceDollars: { type: 'number' },
+  maxHours: nullable('integer')
+}
+
 // → { name, icon, type, price (cents; per hour for rent), unit, maxHours? }
 export async function textToService (text) {
   const out = await ask(PROMPTS.service, text, 'service', {
     type: 'object',
-    properties: {
-      name: { type: 'string' },
-      kind: { type: 'string', enum: Object.keys(ICONS) },
-      type: { type: 'string', enum: TYPES },
-      priceDollars: { type: 'number' },
-      maxHours: nullable('integer')
-    },
-    required: ['name', 'kind', 'type', 'priceDollars', 'maxHours'],
+    properties: SERVICE_FIELDS,
+    required: Object.keys(SERVICE_FIELDS),
     additionalProperties: false
   })
+  return buildService(out)
+}
+
+function buildService (out) {
   let type = TYPES.includes(out.type) ? out.type : 'use'
   if (type === 'access' && cents(out.priceDollars) > 0) type = 'use' // a key is never sold; a price means pay per use
   const svc = {
@@ -98,30 +114,38 @@ export async function textToService (text) {
 }
 
 // ---------- text → behaviour ----------
-// → { serviceId, trigger: { kind, value }, action: { kind, ... } }
+// What the model fills for one rule (flat: small models handle flat JSON better than nested unions).
+const BEHAVIOUR_FIELDS = {
+  triggerKind: { type: 'string', enum: TRIGGERS },
+  triggerNumber: nullable('number'),
+  triggerDays: { type: 'array', items: { type: 'string', enum: DAYS }, maxItems: 7 },
+  actionKind: { type: 'string', enum: ACTIONS },
+  purchaseItem: nullable('string'),
+  purchaseQuantity: nullable('integer'),
+  purchaseMaxDollars: nullable('number'),
+  pricePercent: nullable('number'),
+  depositDollars: nullable('number'),
+  message: nullable('string')
+}
+
+// → { serviceId, trigger: { kind, value }, action: { kind, ... }, text }
 //   trigger.value: stock_below → items left · weekday → ['sat','sun'] · overdue → hours late · after_hour → 0–23
 //   action: propose_purchase { item, quantity?, maxAmount? (cents) } · change_price { percent } · notify { message }
+//           lock {} · unlock {} · keep_deposit { amount? (cents; absent = the whole deposit) }
 export async function textToBehaviour (text, services) {
   const ids = serviceIds(services)
   const out = await ask(`${PROMPTS.behaviour}\nThe hub's services:\n${listServices(services)}`, text, 'behaviour', {
     type: 'object',
-    properties: {
-      serviceId: { type: 'string', enum: ids },
-      triggerKind: { type: 'string', enum: TRIGGERS },
-      triggerNumber: nullable('number'),
-      triggerDays: { type: 'array', items: { type: 'string', enum: DAYS }, maxItems: 7 },
-      actionKind: { type: 'string', enum: ACTIONS },
-      purchaseItem: nullable('string'),
-      purchaseQuantity: nullable('integer'),
-      purchaseMaxDollars: nullable('number'),
-      pricePercent: nullable('number'),
-      message: nullable('string')
-    },
-    required: ['serviceId', 'triggerKind', 'triggerNumber', 'triggerDays', 'actionKind', 'purchaseItem',
-      'purchaseQuantity', 'purchaseMaxDollars', 'pricePercent', 'message'],
+    properties: { serviceId: { type: 'string', enum: ids }, ...BEHAVIOUR_FIELDS },
+    required: ['serviceId', ...Object.keys(BEHAVIOUR_FIELDS)],
     additionalProperties: false
   })
   if (!ids.includes(out.serviceId)) throw new Error('I could not tell which service this rule is for.')
+  return { serviceId: out.serviceId, ...buildBehaviour(out, text) }
+}
+
+// Model output → { trigger, action, text }. Throws with a message for the host if the rule is incomplete.
+function buildBehaviour (out, text) {
   if (!TRIGGERS.includes(out.triggerKind)) throw new Error('I could not tell when this rule should run.')
   if (!ACTIONS.includes(out.actionKind)) throw new Error('I could not tell what this rule should do.')
 
@@ -139,7 +163,7 @@ export async function textToBehaviour (text, services) {
     action = { kind: 'propose_purchase', item }
     const quantity = int(out.purchaseQuantity, 1, 1000)
     if (quantity) action.quantity = quantity
-    if (num(out.purchaseMaxDollars)) action.maxAmount = cents(out.purchaseMaxDollars)
+    if (written(out.purchaseMaxDollars, text)) action.maxAmount = cents(out.purchaseMaxDollars)
   }
   if (out.actionKind === 'change_price') {
     const percent = int(out.pricePercent, -90, 200)
@@ -149,7 +173,12 @@ export async function textToBehaviour (text, services) {
   if (out.actionKind === 'notify') {
     action = { kind: 'notify', message: str(out.message, 140) || `Rule triggered: ${str(text, 100)}` }
   }
-  return { serviceId: out.serviceId, trigger: { kind: out.triggerKind, value }, action, text: str(text, 200) }
+  if (out.actionKind === 'lock' || out.actionKind === 'unlock') action = { kind: out.actionKind }
+  if (out.actionKind === 'keep_deposit') {
+    action = { kind: 'keep_deposit' }
+    if (written(out.depositDollars, text)) action.amount = cents(out.depositDollars)
+  }
+  return { trigger: { kind: out.triggerKind, value }, action, text: str(text, 200) }
 }
 
 // ---------- text → bundle ----------
