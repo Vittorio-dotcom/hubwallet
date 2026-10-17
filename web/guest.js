@@ -42,22 +42,16 @@ const EXAMPLE = {
     address: 'tb1p…example',
     btc: { vanilla: { spendable: 48210 } },
     assets: { nia: [
-      { assetId: 'rgb:example-husd', ticker: DOLLAR, name: 'HubWallet test dollar', balance: { spendable: 10000 } },
-      { assetId: 'rgb:example-key', ticker: 'STAY3F2A', name: 'Casa Rossi stay 17-19 Oct', balance: { spendable: 1 } }
+      { assetId: 'rgb:example-husd', ticker: DOLLAR, name: 'HubWallet test dollar', balance: { spendable: 10000 } }
     ] }
   },
   transfers: [
-    { kind: 'ReceiveBlind', status: 'Settled', assignments: [{ Fungible: 10000 }], createdAt: Date.now() / 1000 - 3600, txid: null },
-    { kind: 'ReceiveWitness', status: 'Settled', assignments: [{ Fungible: 1 }], createdAt: Date.now() / 1000 - 3000, txid: null }
+    { kind: 'ReceiveBlind', status: 'Settled', assignments: [{ Fungible: 10000 }], createdAt: Date.now() / 1000 - 3600, txid: null }
   ],
   hubs: [
-    { url: 'example-a', name: 'Casa Rossi', services: [
-      { id: 'door', name: 'Front door', icon: '🚪', type: 'access', price: 0, device: { state: 'locked' } },
+    { url: 'example-a', name: 'Lavanderia', services: [
       { id: 'washer', name: 'Washing machine', icon: '🧺', type: 'use', price: 200, device: { state: 'idle' } },
-      { id: 'bike', name: 'E-bike', icon: '🚲', type: 'rent', price: 300, maxHours: 4, device: { state: 'idle' } }
-    ] },
-    { url: 'example-b', name: 'Cortile', services: [
-      { id: 'charger', name: 'Charging station', icon: '🔌', type: 'rent', price: 150, maxHours: 3, device: { state: 'idle' } }
+      { id: 'dryer', name: 'Dryer', icon: '🌀', type: 'use', price: 150, device: { state: 'idle' } }
     ] }
   ]
 }
@@ -239,6 +233,32 @@ async function pay (h, s) {
     if (fresh && !$('#device').hidden) renderDevice(h, fresh)
   }
 }
+
+// ---------- "Ask the laundry": the hub's local AI turns a sentence into a bundle ----------
+// POST <hub>/api/ai/bundle { text } → [{ serviceId, hours? }]. The AI only picks services; code computes the total.
+async function ask (text) {
+  const h = hubs[0]
+  if (!h || !text.trim()) return
+  $('#ask-out').replaceChildren(el('p', { class: 'small muted' }, 'The laundry is thinking (local AI)…'))
+  let items
+  try {
+    items = demo ? [{ serviceId: 'washer' }, { serviceId: 'dryer' }] : await api(`${h.url}/api/ai/bundle`, { text })
+  } catch (e) { $('#ask-out').replaceChildren(el('div', { class: 'notice bad' }, e.message)); return }
+  const lines = (Array.isArray(items) ? items : []).map((it) => h.services.find((s) => s.id === it.serviceId && s.type === 'use')).filter(Boolean)
+  if (!lines.length) { $('#ask-out').replaceChildren(el('p', { class: 'small muted' }, 'No matching device. Try "a wash and then the dryer".')); return }
+  const total = lines.reduce((sum, s) => sum + s.price, 0)
+  $('#ask-out').replaceChildren(el('div', { class: 'card' },
+    el('span', { class: 'label' }, 'Proposed by the laundry'),
+    el('div', { class: 'list' }, ...lines.map((s) => el('div', {}, el('span', { 'aria-hidden': 'true' }, s.icon), el('span', { class: 'grow' }, s.name), el('span', { class: 'mono' }, `${money(s.price)} ${DOLLAR}`)))),
+    el('div', { class: 'total' }, el('span', {}, 'Total'), el('span', {}, `${money(total)} ${DOLLAR}`)),
+    el('button', { class: 'btn primary block', type: 'button', on: { click: () => payBundle(h, lines) } }, `Pay ${money(total)} ${DOLLAR}`)))
+}
+// One device after the other: the second payment starts when the first is confirmed
+// (the guest's dollars sit on one UTXO, which is busy until the first transfer settles).
+async function payBundle (h, list) {
+  for (const s of list) { openDevice(h, s); await pay(h, s); if ($('#track-msg').textContent.includes('did not') || $('#track .notice.bad')) break }
+}
+$('#ask-form').addEventListener('submit', (e) => { e.preventDefault(); ask($('#ask-text').value) })
 
 load()
 setInterval(() => { if (!busy && $('#device').hidden) load() }, 6000)

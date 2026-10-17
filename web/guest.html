@@ -31,6 +31,16 @@
     <span class="hint" id="balance-hint">Movements, address and keys ›</span>
   </button>
 
+  <section class="card" aria-labelledby="ask-title">
+    <h2 id="ask-title">Ask the laundry</h2>
+    <form id="ask-form" class="row">
+      <input id="ask-text" class="grow" placeholder="A wash and then the dryer" aria-label="What do you need?" autocomplete="off" style="font:inherit;padding:11px 12px;border-radius:12px;border:1px solid var(--line);background:var(--surface);color:var(--ink);min-width:0">
+      <button class="btn primary" type="submit">Ask</button>
+    </form>
+    <div id="ask-out"></div>
+    <p class="small muted">Answered by the hub's local AI. Nothing leaves the laundry.</p>
+  </section>
+
   <section aria-labelledby="near-title" style="display:flex;flex-direction:column;gap:12px">
     <div class="row"><h2 class="grow" id="near-title">Devices nearby</h2><button class="btn" id="reload" type="button">Refresh</button></div>
     <div class="grid" id="devices"></div>
