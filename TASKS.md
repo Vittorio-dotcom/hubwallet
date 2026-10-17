@@ -91,6 +91,7 @@ Tasks about stay keys and the door (3, part of 19) and the bike (5) are **droppe
 | 33 | Raspberry/ESP32 device driven by the hub | — | later |
 
 ## Notes
+- **UI redesign (Sat night, Lapo + Claude):** Apple-style redesign of `web/` (new design system in `app.css`, SVG icons instead of emoji, illustrations in `web/img/`). Page logic and API calls are kept. **Vittorio: please avoid editing `web/` until it is pushed** (or tell Lapo which page you are on) to avoid conflicts.
 - **Verified Sat evening on the demo PC:** real payment guest → hub (HUSD on Mutinynet) → washing machine running, through the device layer; host AI (chat, edit) working against Lapo's QVAC server.
 - **For Vittorio (from Lapo, Sat evening):** (1) `/api/devices/:id/edit` now returns `{ reply }` instead of an error when something is missing ("How much?", "From what time?"); keep sending `text` = all host requests since the last apply. (2) New `POST /api/devices/documents { text }` → `[{ deviceId, rule, text }]` for the documents panel (#23); demo document: `prompts/documents/regolamento-lavanderia.md` (6 rules, ~8 s). (3) Hour-band prices work: "dopo le 20 costa 2,50".
 - **For Alessandro (guest wallet service):** the guest app can hold several wallets (each a `guest.js` on its own port) and calls them from the page. A wallet on another port is cross-origin: `guest.js` needs CORS, but since `/api/pay` spends, allow only local origins (e.g. `http://127.0.0.1:*`, `http://localhost:*`), never `*`.
