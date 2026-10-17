@@ -20,7 +20,7 @@ import { createHub } from './hub-core.js'
 const NAME = process.env.HUB_NAME || 'Hub'
 const PORT = Number(process.env.PORT || 8080)
 const WALLET = process.env.WALLET || 'hub-a'
-const POLL_MS = Math.max(5_000, Number(process.env.POLL_MS || 15_000))
+const POLL_MS = Math.max(30_000, Number(process.env.POLL_MS || 120_000)) // fallback only: see Hub constructor in hub-core.js
 const HOST = process.env.HUB_HOST || '0.0.0.0' // the hub is meant to be reached on the LAN
 
 const hub = await createHub({ name: NAME, walletName: WALLET, pollMs: POLL_MS })

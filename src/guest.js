@@ -30,6 +30,31 @@ const wallet = await new Wallet(WALLET).open()
 const trace = new Trace(path.join(wallet.dir, 'trace.jsonl'))
 const proofsDir = path.join(wallet.dir, 'proofs')
 
+// ---------- when to refresh ----------
+// A rgb-lib refresh syncs with the indexer and is SYNCHRONOUS: while it runs (up to ~30 s on a
+// wallet with history) this server answers nothing, not even static files. So no fixed polling:
+//   - after this wallet pays → burst: +10 s (read the receiver's ACK, broadcast), +35 s, +70 s, +120 s (the block)
+//   - a transfer still in progress (cheap local check) → fallback every 2 min
+//   - nothing in progress → no refresh (pages stay instant); POST /api/refresh still works by hand
+const FALLBACK_MS = Math.max(30_000, Number(process.env.WALLET_POLL_MS || 120_000))
+let refreshing = false
+let balanceCache = null // { at, data }: /api/me also syncs, so pages get a copy at most 30 s old
+async function refreshNow () {
+  if (refreshing) return
+  refreshing = true
+  try { await wallet.refresh() } finally { refreshing = false; balanceCache = null }
+}
+function burst (reason) {
+  for (const d of [10_000, 35_000, 70_000, 120_000]) setTimeout(() => refreshNow(), d)
+  console.log(`[watch] ${reason}: refresh at +10 s, +35 s, +70 s, +120 s`)
+}
+// listTransfers reads the local database only (no sync), so this check is instant.
+async function inProgress () {
+  const list = await wallet.transfers().catch(() => [])
+  const now = Date.now() / 1000
+  return (list || []).some((t) => ['WaitingCounterparty', 'WaitingConfirmations', 0, 1].includes(t.status) && !(t.expiration && t.expiration < now))
+}
+
 // One payer key per hub, so two hubs cannot link their customers.
 // The file name is a hash of the hub key, not the hub's name.
 function payerKeyFor (hubKey) {
@@ -88,7 +113,12 @@ app.use((req, res, next) => {
 if (fs.existsSync(path.resolve('web'))) app.use(express.static(path.resolve('web')))
 const wrap = (fn) => (req, res) => Promise.resolve(fn(req, res)).then((x) => res.json(x)).catch((e) => res.status(400).json({ error: String(e.message || e) }))
 
-app.get('/api/me', wrap(() => wallet.balance()))
+app.get('/api/me', wrap(async (req) => {
+  if (req.query.fresh !== '1' && balanceCache && Date.now() - balanceCache.at < 30_000) return balanceCache.data
+  const data = { ...(await wallet.balance()), readAt: Date.now() }
+  balanceCache = { at: Date.now(), data }
+  return data
+}))
 
 // An invoice to RECEIVE (e.g. an access token, or earnings swept from a hub).
 // Without assetId it accepts any asset, so an asset this wallet has never seen can arrive.
@@ -121,6 +151,7 @@ app.post('/api/pay-request', wrap(async (req) => {
   trace.append('pay.sent', c.paymentId, {
     hub: c.hub, hubTag: tagOf(c.hubKey), description: c.description, assetId: c.assetId, amount: c.amount, txid: sent.txid, payerTag
   })
+  burst(`paid ${c.paymentId}`)
   return { ...sent, link: sent.txid ? EXPLORER + sent.txid : undefined, payerTag, claimError }
 }))
 
@@ -145,14 +176,15 @@ app.post('/api/pay', wrap(async (req) => {
   if (inv.assetId && inv.assetId !== assetId) throw new Error('The invoice asks for a different asset.')
   const r = await wallet.send({ invoice, assetId, amount: Number(amount) })
   trace.append('pay.sent', inv.recipientId, { assetId, amount: Number(amount), txid: r.txid, description: String(description).slice(0, 200) })
+  burst(`paid ${inv.recipientId}`)
   return { ...r, link: r.txid ? EXPLORER + r.txid : undefined }
 }))
 
-app.post('/api/refresh', wrap(async () => { await wallet.refresh(); return { ok: true } }))
+app.post('/api/refresh', wrap(async () => { await refreshNow(); return { ok: true } })) // manual: always refreshes
 app.post('/api/utxos', wrap(async (req) => ({ created: await wallet.createUtxos(Number(req.body?.num || 5)) })))
 app.get('/api/transfers', wrap((req) => wallet.transfers(req.query.assetId)))
 app.get('/api/trace', wrap(() => trace.list()))
 app.get('/api/trace/verify', wrap(() => trace.verify()))
 
-setInterval(() => wallet.refresh(), 20_000) // pick up incoming consignments
+setInterval(async () => { if (await inProgress()) refreshNow() }, FALLBACK_MS) // only while a transfer is in progress
 app.listen(PORT, HOST, () => console.log(`Wallet ${WALLET} on http://${HOST}:${PORT}`))

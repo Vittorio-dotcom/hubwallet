@@ -46,16 +46,27 @@ function checkAssetId (assetId) {
 const checkText = (text, max = 200) => String(text ?? '').replace(/[\u0000-\u001f]/g, ' ').trim().slice(0, max)
 
 export class Hub extends EventEmitter {
-  // name: shown to payers · walletName: folder in data/ · pollMs: watcher interval
-  // (15 s or more: the indexer and the proxy are shared) · signTimeoutMs: an unsigned
+  // name: shown to payers · walletName: folder in data/ · signTimeoutMs: an unsigned
   // PSBT older than this expires and its inputs are released.
-  constructor ({ name, walletName, root = process.env.DATA_DIR || 'data', pollMs = 15_000, signTimeoutMs = 10 * 60_000 }) {
+  // pollMs: FALLBACK interval, used only while something is open (default 2 min).
+  //
+  // Why no fixed fast polling: a rgb-lib refresh syncs with the indexer and is SYNCHRONOUS,
+  // so while it runs (up to ~30 s on a wallet with history) this process answers nothing.
+  // So the hub refreshes only when there is a reason:
+  //   - nothing open                 → no refresh at all (pages stay instant)
+  //   - a payer claim arrives        → burst: now (consignment, ACK), then +35 s, +70 s, +120 s (the block)
+  //   - the signer signed a spend    → same burst (receiver's ACK → broadcast → block)
+  //   - open payment without a claim → fallback every pollMs (an anonymous payer still gets seen)
+  // Blocks come every ~30 s on average: after 35 s ~69% of the time, after 70 s ~90%, after 120 s ~98%.
+  constructor ({ name, walletName, root = process.env.DATA_DIR || 'data', pollMs = 120_000, signTimeoutMs = 10 * 60_000 }) {
     super()
     this.name = name
     this.wallet = new WatchWallet(walletName, root)
     this.pollMs = pollMs
     this.signTimeoutMs = signTimeoutMs
     this.polling = false
+    this.followUntil = 0 // a burst is running until this time
+    this.walletCache = null // { at, data }: GET /api/wallet also syncs, so cache it
   }
 
   async open () {
@@ -80,8 +91,26 @@ export class Hub extends EventEmitter {
 
   save () { fs.writeFileSync(this.stateFile, JSON.stringify(this.state, null, 1), { mode: 0o600 }) }
 
-  start () { this.timer = setInterval(() => this.poll(), this.pollMs); this.poll(); return this }
-  stop () { clearInterval(this.timer) }
+  // One refresh at start-up (to catch up), then only bursts and the fallback.
+  start () {
+    this.timer = setInterval(() => { if (this.busy()) this.poll() }, this.pollMs)
+    this.poll()
+    return this
+  }
+  stop () { clearInterval(this.timer); this.followUntil = 0 }
+
+  // Is there anything the watcher must look at?
+  busy () {
+    return Date.now() < this.followUntil || this.state.payments.some((p) => OPEN.includes(p.status))
+  }
+
+  // A few targeted refreshes after an event we know about (claim received, spend signed).
+  burst (reason) {
+    const delays = [0, 35_000, 70_000, 120_000]
+    this.followUntil = Math.max(this.followUntil, Date.now() + delays[delays.length - 1] + 5_000)
+    for (const d of delays) setTimeout(() => this.poll(), d)
+    console.log(`[watch] ${reason}: refresh now, +35 s, +70 s, +120 s`)
+  }
 
   info () { return { name: this.name, network: 'signet (Mutinynet)', hubKey: this.hubKey } }
 
@@ -105,6 +134,7 @@ export class Hub extends EventEmitter {
     const p = {
       id: newId(), description, assetId, amount, meta,
       invoice: inv.invoice, recipientId: inv.recipientId, invoiceKind: 'witness', anyAsset: inv.anyAsset,
+      batchTransferIdx: inv.batchTransferIdx, // to fail exactly this invoice if it expires unpaid
       status: 'waiting', createdAt: now, expiresAt: now + seconds * 1000,
       history: [{ status: 'waiting', at: now }]
     }
@@ -151,11 +181,12 @@ export class Hub extends EventEmitter {
   }
 
   // =====================================================================
-  // THE WATCHER: runs every pollMs
+  // THE WATCHER: runs at start-up, in bursts and as a fallback (see the constructor)
   // =====================================================================
   async poll () {
     if (this.polling) return
     this.polling = true
+    this.walletCache = null
     try {
       // 1. Download consignments, validate them, update confirmations.
       const err = await this.wallet.refresh()
@@ -202,6 +233,11 @@ export class Hub extends EventEmitter {
           }
         } else if (st === 'Failed') {
           this.setStatus(p, 'failed', { txid: found.txid })
+        } else if (st === 'WaitingCounterparty' && Date.now() > p.expiresAt) {
+          // Expired and nothing arrived: fail THIS invoice only, so later refreshes skip it
+          // (failTransfers without an index would fail every open invoice).
+          await this.wallet.cancel(p.batchTransferIdx).catch(() => {})
+          this.setStatus(p, 'expired')
         } else {
           this.setStatus(p, st, { txid: found.txid || p.txid }) // WaitingCounterparty / WaitingConfirmations
         }
@@ -237,6 +273,8 @@ export class Hub extends EventEmitter {
     if (p.status === 'paid') p.payerVerified = p.txid === txid
     this.save()
     this.trace.append('payment.claim', p.id, { payerTag: p.claim.payerTag, txid })
+    // The payer has just put the consignment on the proxy: this is the moment to look.
+    if (OPEN.includes(p.status)) this.burst(`payment ${p.id} claimed`)
     return { payerTag: p.claim.payerTag }
   }
 
@@ -336,6 +374,8 @@ export class Hub extends EventEmitter {
     try {
       const r = await this.wallet.finish(item.kind, signedPsbt)
       this.setSignStatus(item, 'signed', { txid: r.txid, created: r.created, signedAt: Date.now() })
+      // A send waits for the receiver's ACK before rgb-lib broadcasts it, then for the block.
+      this.burst(`${item.kind} ${item.id} signed`)
       return this.signView(item)
     } catch (e) {
       // Wrong or tampered PSBT, or broadcast failure: release the inputs.
@@ -369,10 +409,15 @@ export class Hub extends EventEmitter {
     return a
   }
 
-  async walletView () {
+  // Balance and UTXOs sync with the indexer (blocking), so pages polling this route get a
+  // copy at most 30 s old; `fresh` forces a new read. Every watcher round clears the copy.
+  async walletView ({ fresh = false } = {}) {
+    if (!fresh && this.walletCache && Date.now() - this.walletCache.at < 30_000) return this.walletCache.data
     const [bal, utxos] = await Promise.all([this.wallet.balance(), this.wallet.unspents()])
     const free = (utxos || []).filter((u) => u.utxo?.colorable && !(u.rgbAllocations || []).length).length
-    return { ...bal, freeColorableUtxos: free, keys: this.wallet.publicKeys(), hubKey: this.hubKey }
+    const data = { ...bal, freeColorableUtxos: free, keys: this.wallet.publicKeys(), hubKey: this.hubKey, readAt: Date.now() }
+    this.walletCache = { at: Date.now(), data }
+    return data
   }
 
   // =====================================================================
@@ -397,7 +442,7 @@ export class Hub extends EventEmitter {
     // ---- owner (service provider, its signer, the layers above) ----
     r.post('/payments', owner, wrap((req) => this.requestPayment(req.body)))
     r.get('/payments', owner, wrap((req) => this.listPayments(req.query)))
-    r.get('/wallet', owner, wrap(() => this.walletView()))
+    r.get('/wallet', owner, wrap((req) => this.walletView({ fresh: req.query.fresh === '1' })))
     r.post('/assets', owner, wrap((req) => this.issueAsset(req.body)))
     r.post('/transfers', owner, wrap((req) => this.prepareTransfer(req.body)))
     r.post('/utxos', owner, wrap((req) => this.prepareUtxos(req.body)))
@@ -406,7 +451,7 @@ export class Hub extends EventEmitter {
     r.post('/to-sign/:id/reject', owner, wrap((req) => this.reject(req.params.id)))
     r.get('/trace', owner, wrap((req) => this.trace.list({ ref: req.query.ref, limit: Number(req.query.limit) || 200 })))
     r.get('/trace/verify', owner, wrap(() => this.trace.verify()))
-    r.post('/refresh', owner, wrap(async () => { await this.poll(); return { ok: true } }))
+    r.post('/refresh', owner, wrap(async () => { await this.poll(); return { ok: true } })) // manual: always refreshes
     return r
   }
 }

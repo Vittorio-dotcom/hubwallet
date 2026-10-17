@@ -29,7 +29,7 @@ HUB_NAME="Lavanderia" PORT=8080 WALLET=hub-a npm run hub        # owner key in d
 HUB_KEY=$(cat data/hub-a/owner-key.txt) node src/signer.js watch hub-a http://localhost:8080   # the host's "phone"
 PORT=8090 WALLET=guest-marta npm run guest                      # a payer wallet (client); PORT=8091 WALLET=provider for the host's own wallet
 ```
-Env: `POLL_MS` (watcher interval, default 15000, minimum 5000), `HUB_HOST` (default `0.0.0.0`), `GUEST_HOST`
+Env: `POLL_MS` (watcher **fallback** interval, default 120000, minimum 30000: the hub refreshes in short bursts when a payer claim arrives or a spend is signed, and not at all when nothing is open; rgb-lib refreshes block the process), `WALLET_POLL_MS` (same fallback for `guest.js`), `HUB_HOST` (default `0.0.0.0`), `GUEST_HOST`
 (default `127.0.0.1`), `DATA_DIR` (default `data`), `HUB_KEY` (override the owner key).
 
 ---
