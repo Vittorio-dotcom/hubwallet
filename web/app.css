@@ -373,16 +373,6 @@ body::before { content: ""; position: fixed; inset: -10vmax; z-index: -1; pointe
 /* theme switch in the top bar */
 .theme-btn { width: 36px; height: 36px }
 
-/* reduced transparency (e.g. Windows "Transparency effects" off): denser, more readable glass;
-   the material, the light and the colour field stay, only the see-through is reduced */
-@media (prefers-reduced-transparency: reduce) {
-  :root { --glass: rgba(255,255,255,.8); --glass-strong: rgba(255,255,255,.9); --glass-weak: rgba(255,255,255,.62) }
-  :root[data-theme="dark"] { --glass: rgba(30,30,34,.82); --glass-strong: rgba(36,36,40,.9); --glass-weak: rgba(44,44,48,.66) }
-}
-@media (prefers-reduced-transparency: reduce) and (prefers-color-scheme: dark) {
-  :root:not([data-theme="light"]) { --glass: rgba(30,30,34,.82); --glass-strong: rgba(36,36,40,.9); --glass-weak: rgba(44,44,48,.66) }
-}
-
 /* ---------- host: phone layout (below 980 px; the desktop layout above is unchanged) ----------
    Order on a phone: hub switcher (pills) → hub overview, signatures, machines, AI tools → personal wallet. */
 @media (max-width: 979px) {
@@ -404,4 +394,86 @@ body::before { content: ""; position: fixed; inset: -10vmax; z-index: -1; pointe
   .devices { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px }
   .device-card { min-height: 160px; padding: 14px }
   .device-card.add { display: none }                     /* same action as "Add a machine" in the AI tools below */
+}
+
+
+/* =====================================================================
+   LIQUID GLASS — motion and light (iOS 26 material)
+   - specular light that follows the pointer (--mx/--my set by web/ui.js)
+   - press: the glass bulges and glows, then springs back (spring easing)
+   - morphing: top bar compacts on scroll, sheets grow out of the tapped element,
+     the tab bar shrinks while scrolling, indicators flow like a droplet
+   ===================================================================== */
+:root {
+  --spring: linear(0, 0.009, 0.035 2.1%, 0.141, 0.281 6.7%, 0.723 12.9%, 0.938 16.7%, 1.017, 1.077, 1.121, 1.149 24.3%, 1.159, 1.163, 1.161, 1.154 29.9%, 1.129 32.8%, 1.051 39.6%, 1.017 43.1%, 0.991, 0.977 51%, 0.974 53.8%, 0.975 57.1%, 0.997 69.8%, 1.003 76.9%, 1.004 83.8%, 1);
+  --spec: rgba(255,255,255,.55);
+}
+:root[data-theme="dark"] { --spec: rgba(255,255,255,.16) }
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) { --spec: rgba(255,255,255,.16) } }
+
+/* the moving specular highlight: an extra light layer on every glass surface */
+.group, .overview, .device-card, .confirm, .proposal, .screen-pay, .composer, .sign-banner, .pass, .topbar, .tabbar, .icon-btn, .btn:not(.pay):not(.primary):not(.plain), .seg, .suggest button {
+  background-image: radial-gradient(220px circle at var(--mx, 30%) var(--my, -40%), var(--spec), transparent 62%) }
+.btn.primary { background-image: radial-gradient(160px circle at var(--mx, 50%) var(--my, -40%), rgba(255,255,255,.45), transparent 60%), linear-gradient(180deg, color-mix(in srgb, var(--blue) 82%, #fff), var(--blue)) }
+
+/* press: bulge, glow, spring back */
+.btn, .icon-btn, .cell, .pass, .device-card, .tab, .suggest button, .hub-switch button, .seg button {
+  transition: transform .6s var(--spring), filter .35s var(--ease), box-shadow .35s var(--ease) }
+.press { transform: scale(var(--press, 1.04)); filter: brightness(1.08) saturate(1.1) }
+.cell.press, .pass.press, .device-card.press { --press: .975 }
+.btn:active:not(:disabled), .device-card:active { transform: none } /* replaced by .press */
+
+/* top bar morph: compacts while scrolling and takes the page title */
+.topbar { transition: padding .5s var(--spring), margin .5s var(--spring), box-shadow .3s }
+.topbar-title { position: absolute; left: 50%; transform: translate(-50%, 8px); opacity: 0; font-weight: 600; font-size: 15px; pointer-events: none; transition: opacity .25s, transform .5s var(--spring); white-space: nowrap }
+.topbar.compact .topbar-title { opacity: 1; transform: translate(-50%, 0) }
+.topbar.compact .example-tag { opacity: 0; transition: opacity .2s }
+.topbar .brand { transition: color .25s }
+.topbar.compact .brand { color: transparent }
+.topbar .example-tag { transition: opacity .3s }
+.topbar .brand > * { transition: opacity .3s }
+.topbar.compact { padding-top: 3px; padding-bottom: 3px }
+
+/* floating tab bar (guest app): a glass capsule at the bottom, shrinks while scrolling down */
+.tabbar { position: fixed; z-index: 15; left: 50%; bottom: max(16px, env(safe-area-inset-bottom)); transform: translateX(-50%);
+  display: flex; gap: 4px; padding: 6px; border-radius: 999px; background-color: var(--glass);
+  -webkit-backdrop-filter: var(--blur); backdrop-filter: var(--blur);
+  box-shadow: inset 0 1px 0 var(--glass-glint), inset 0 0 0 1px var(--glass-rim), 0 14px 40px var(--glass-shade);
+  transition: padding .5s var(--spring), gap .5s var(--spring) }
+.tab { position: relative; z-index: 1; display: flex; flex-direction: column; align-items: center; gap: 2px; min-width: 76px; min-height: 52px; justify-content: center;
+  border: 0; background: transparent; border-radius: 999px; color: var(--ink-2); font-size: 11px; font-weight: 600; transition: min-width .5s var(--spring), color .2s }
+.tab[aria-current="page"] { color: var(--blue) }
+.tab .tab-label { transition: opacity .2s, max-height .4s var(--spring); max-height: 16px; overflow: hidden }
+.tabbar.mini .tab { min-width: 52px }
+.tabbar.mini .tab-label { opacity: 0; max-height: 0 }
+.tab-thumb { position: absolute; z-index: 0; top: 6px; bottom: 6px; border-radius: 999px; background: var(--glass-strong);
+  box-shadow: inset 0 1px 0 var(--glass-glint), inset 0 0 0 1px var(--glass-rim), 0 4px 14px var(--glass-shade); pointer-events: none }
+.page:has(+ .tabbar), body:has(.tabbar) .page { padding-bottom: 120px }
+
+/* segmented control: a glass droplet slides and stretches between options */
+.seg { position: relative }
+.seg button { position: relative; z-index: 1 }
+.seg button[aria-selected="true"], .seg button[aria-pressed="true"] { background: transparent; box-shadow: none }
+.seg-thumb { position: absolute; z-index: 0; top: 2px; bottom: 2px; border-radius: 7px; background: var(--glass-strong);
+  box-shadow: inset 0 1px 0 var(--glass-glint), 0 2px 8px var(--glass-shade); pointer-events: none }
+
+/* page dots flow into each other (SVG goo filter from web/ui.js) */
+.dots { filter: url(#goo) }
+.dots { gap: 10px }
+.dots span { background: var(--ink-3) }
+.dots span.on { background: var(--ink) }
+.dots span { transition: width .5s var(--spring), background .3s }
+
+/* sheets grow out of what was tapped (web/ui.js animates the panel); the backdrop fades in */
+.sheet { transition: background .3s }
+@media (prefers-reduced-motion: no-preference) { .sheet-panel { animation: none } }
+
+/* glass reacts to light also when idle: a slow sheen across passes */
+@media (prefers-reduced-motion: no-preference) {
+  .pass::after { animation: sheen 9s ease-in-out infinite }
+  @keyframes sheen { 0%, 100% { transform: translateX(-12%) } 50% { transform: translateX(14%) } }
+}
+@media (prefers-reduced-motion: reduce) {
+  .btn, .icon-btn, .cell, .pass, .device-card, .tab, .topbar, .tabbar { transition: none !important }
+  .press { transform: none; filter: brightness(1.06) }
 }

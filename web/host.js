@@ -10,6 +10,7 @@
 // With no hub connected the page shows example data (marked) so it can be tried.
 // The AI never saves anything: it proposes, the hub validates, the host applies. Spending waits for the signer.
 import { el, fill, money, DOLLAR, icon, porthole, statusOf, clock, ruleText, ruleIcon, themeButton, lens } from './ui.js'
+import { liquid, morphTopbar, morphOpen, morphClose } from './liquid.js'
 
 const $ = (s) => document.querySelector(s)
 const load_ = (k, d) => { try { return JSON.parse(localStorage.getItem(k)) ?? d } catch { return d } }
@@ -127,7 +128,7 @@ function render () {
     el('button', { class: 'btn primary', type: 'button', disabled: !canSweep, on: { click: () => sweep(h, earned) } }, icon('arrowDown', { size: 18 }), 'Move to my wallet')))
 
   // machines
-  fill($('#devices'), h.devices.map((d) => el('button', { class: 'device-card', type: 'button', on: { click: () => openDevice(d) }, 'aria-label': `${d.name}, ${stateText(d)}` },
+  fill($('#devices'), h.devices.map((d) => el('button', { class: 'device-card', type: 'button', on: { click: (e) => openDevice(d, e.currentTarget) }, 'aria-label': `${d.name}, ${stateText(d)}` },
       el('div', { class: 'row', style: 'align-items:flex-start' }, porthole(d, { size: 64 }), el('span', { class: 'grow' }), el('span', { class: `badge ${statusOf(d).key}` }, stateText(d))),
       el('div', { class: 'stack', style: 'gap:2px' }, el('h3', {}, d.name), el('span', { class: 'sub muted' }, `${money(d.price)} ${DOLLAR} per ${d.unit}`)),
       el('div', { class: 'meta footnote' }, el('span', {}, `${(d.rules || []).length} rule${(d.rules || []).length === 1 ? '' : 's'}`), el('span', { class: 'num' }, `${money(d.earned || 0)} earned`)))),
@@ -175,10 +176,10 @@ function proposal (cur, next, diffList, onApply) {
 
 // ---------- a machine: details, edit with the AI, demo clock ----------
 let current = null
-function openDevice (d) {
+function openDevice (d, from) {
   current = d; $('#device-title').textContent = d.name; $('#edit-text').value = ''; fill($('#edit-out'))
   editChat = [{ role: 'ai', text: `What do you want to change on the ${d.name.toLowerCase()}?` }]; pendingEdit = []
-  drawEditChat(); renderDevice(); show('device')
+  drawEditChat(); renderDevice(); show('device', from)
 }
 function renderDevice () {
   const d = current
@@ -362,10 +363,15 @@ $('#add-wallet-form').addEventListener('submit', async (e) => {
 })
 
 // ---------- sheets ----------
-function show (id) {
-  document.querySelectorAll('.sheet').forEach((s) => { s.hidden = s.id !== id })
+// Sheets grow out of the element that opened them and sink back when closed (web/liquid.js).
+async function show (id, from) {
+  const open = [...document.querySelectorAll('.sheet')].find((s) => !s.hidden)
+  if (open && open.id !== id) { await morphClose(open); open.hidden = true }
+  if (id) {
+    const sheet = document.getElementById(id); sheet.hidden = false
+    const panel = sheet.querySelector('.sheet-panel'); panel.focus({ preventScroll: true }); morphOpen(panel, from || null)
+  }
   document.body.style.overflow = id ? 'hidden' : ''
-  if (id) document.querySelector(`#${id} .sheet-panel`)?.focus({ preventScroll: true })
 }
 const sheetOpen = () => [...document.querySelectorAll('.sheet')].some((s) => !s.hidden)
 document.addEventListener('click', (e) => { if (e.target.closest('[data-close]') || e.target.classList?.contains('sheet')) show(null) })
@@ -375,6 +381,7 @@ $('#wallets').addEventListener('scroll', () => { const c = $('#wallets'); const 
 // static icons in the markup
 fill($('#brand-mark'), icon('hub', { size: 16 }))
 $('#demo-tag').after(themeButton())
+liquid(); morphTopbar($('.topbar'), $('#hub-name'))
 lens($('.topbar'))
 fill($('#ico-add'), icon('plus', { size: 16 }))
 fill($('#ico-doc'), icon('doc', { size: 16 }))

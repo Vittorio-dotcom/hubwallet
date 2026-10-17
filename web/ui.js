@@ -164,7 +164,6 @@ export function themeButton () {
 // what is behind the glass near its edges (feDisplacementMap used as a backdrop-filter). Other browsers keep the
 // frosted glass of app.css. Filters are cached by size, so re-rendered elements of the same size share one.
 const chromium = typeof navigator !== 'undefined' && /(Chrome|Edg)\//.test(navigator.userAgent) && !/Firefox|FxiOS/.test(navigator.userAgent)
-const reduceTransparency = () => matchMedia('(prefers-reduced-transparency: reduce)').matches
 let defs = null
 const lensCache = new Map()
 function lensFilter (w, h, r, bezel = 22, scale = 46) {
@@ -212,6 +211,6 @@ function applyLens (node) {
 }
 // Give these elements real refraction (call again after re-rendering them).
 export function lens (...nodes) {
-  if (!chromium || reduceTransparency()) return
+  if (!chromium) return
   for (const n of nodes.flat()) { if (!n) continue; applyLens(n); if (sizer && !observed.has(n)) { sizer.observe(n); observed.add(n) } }
 }

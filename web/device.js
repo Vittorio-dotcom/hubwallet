@@ -2,6 +2,8 @@
 // the porthole ring fills while the device runs, with a countdown; a QR code opens the guest app on this hub.
 // Falls back to example data (marked) while no hub answers.
 import { el, fill, money, DOLLAR, icon, porthole, statusOf, clock, ruleText, ruleIcon, themeButton } from './ui.js'
+import { liquid } from './liquid.js'
+liquid()
 
 const $ = (s) => document.querySelector(s)
 const qs = new URLSearchParams(location.search)

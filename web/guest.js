@@ -5,6 +5,7 @@
 //   confirms it (search field or QR link), and can be used from a distance.
 // - If no hub answers, example devices are shown, marked "Example data".
 import { el, fill, money, DOLLAR, icon, porthole, statusOf, clock, themeButton, lens } from './ui.js'
+import { liquid, morphTopbar, droplet, tabbar, morphOpen, morphClose } from './liquid.js'
 
 const $ = (s) => document.querySelector(s)
 const EXAMPLE_WALLET = 'example:wallet'
@@ -136,7 +137,7 @@ function render () {
     .filter(({ h, s }) => !q || h.name.toLowerCase().includes(q) || s.name.toLowerCase().includes(q))
   const many = names.length > 1
   fill($('#devices'), items.length
-    ? el('div', { class: 'group arts' }, items.map(({ h, s }) => el('button', { class: 'cell', type: 'button', on: { click: () => openDevice(h, s) }, 'aria-label': `${s.name}, ${priceText(s)}, ${stateText(s)}` },
+    ? el('div', { class: 'group arts' }, items.map(({ h, s }) => el('button', { class: 'cell', type: 'button', on: { click: (e) => openDevice(h, s, e.currentTarget) }, 'aria-label': `${s.name}, ${priceText(s)}, ${stateText(s)}` },
         porthole(s, { size: 48 }),
         el('div', { class: 'grow stack', style: 'gap:4px' }, el('div', { class: 'title' }, s.name), el('div', { class: 'sub' }, many ? `${priceText(s)} · ${h.name}` : priceText(s)), el('div', {}, badge(s))),
         el('span', { class: 'chev' }, icon('chevronRight', { size: 18 })))))
@@ -240,20 +241,39 @@ $('#search-form').addEventListener('submit', async (e) => {
 $('#search').addEventListener('input', (e) => { if (!/[.:]/.test(e.target.value)) { query = e.target.value.trim(); render() } })
 
 // ---------- sheets and tabs ----------
-function show (id) {
-  document.querySelectorAll('.sheet').forEach((s) => { s.hidden = s.id !== id })
+// Sheets grow out of the element that opened them and sink back when closed (web/liquid.js).
+async function show (id, from) {
+  const open = [...document.querySelectorAll('.sheet')].find((s) => !s.hidden)
+  if (open && open.id !== id) { await morphClose(open); open.hidden = true }
+  if (id) {
+    const sheet = document.getElementById(id); sheet.hidden = false
+    const panel = sheet.querySelector('.sheet-panel'); panel.focus({ preventScroll: true }); morphOpen(panel, from)
+    if (id === 'wallet') syncSeg()
+  }
   document.body.style.overflow = id ? 'hidden' : ''
-  if (id) document.querySelector(`#${id} .sheet-panel`)?.focus({ preventScroll: true })
+  setTab(id === 'wallet' || id === 'user' ? id : 'home')
 }
 document.addEventListener('click', (e) => {
   if (e.target.closest('[data-close]') || e.target.classList?.contains('sheet')) { show(null); openDev = null }
 })
 document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && !busy) { show(null); openDev = null } })
-$('#open-user').onclick = () => show('user')
+$('#open-user').onclick = (e) => show('user', e.currentTarget)
 $('#reload').onclick = async () => { if (current() && current().url !== EXAMPLE_WALLET) await walletApi('/api/refresh', {}).catch(() => {}); refresh() }
+const syncSeg = droplet($('#wallet .seg'), '[data-tab]', (b) => b.getAttribute('aria-selected') === 'true')
 document.querySelectorAll('[data-tab]').forEach((b) => b.addEventListener('click', () => {
   document.querySelectorAll('[data-tab]').forEach((x) => x.setAttribute('aria-selected', String(x === b)))
   for (const t of ['moves', 'address', 'keys']) $('#tab-' + t).hidden = t !== b.dataset.tab
+  syncSeg()
+}))
+
+// floating tab bar: machines (this page), wallet and profile sheets; the droplet follows the current one
+const syncTab = droplet($('#tabbar'), '.tab', (b) => b.getAttribute('aria-current') === 'page', 'tab-thumb')
+function setTab (go) {
+  document.querySelectorAll('.tab').forEach((t) => { if (t.dataset.go === go) t.setAttribute('aria-current', 'page'); else t.removeAttribute('aria-current') })
+  syncTab()
+}
+document.querySelectorAll('.tab').forEach((t) => t.addEventListener('click', () => {
+  if (t.dataset.go === 'home') { show(null); scrollTo({ top: 0, behavior: 'smooth' }) } else show(t.dataset.go, t)
 }))
 $('#copy-address').onclick = async () => { try { await navigator.clipboard.writeText($('#address').textContent); $('#copy-address').textContent = 'Copied' } catch { getSelection().selectAllChildren($('#address')) } }
 $('#make-invoice').onclick = async () => {
@@ -264,7 +284,7 @@ const notice = (kind, text, ...extra) => el('div', { class: `notice ${kind}` }, 
 // ---------- a machine: details → pay with the active wallet → follow ----------
 let hours = 1
 let openDev = null
-function openDevice (h, s) { openDev = { h, s }; hours = 1; $('#dev-title').textContent = s.name; $('#track').hidden = true; $('#dev-body').hidden = false; fill($('#track-msg')); renderDevice(h, s); show('device') }
+function openDevice (h, s, from) { openDev = { h, s }; hours = 1; $('#dev-title').textContent = s.name; $('#track').hidden = true; $('#dev-body').hidden = false; fill($('#track-msg')); renderDevice(h, s); show('device', from) }
 function renderDevice (h, s) {
   const st = statusOf(s)
   const amount = s.type === 'rent' ? s.price * hours : s.price
@@ -385,7 +405,9 @@ function confirmPay (c, h) {
 fill($('#brand-mark'), icon('hub', { size: 16 }))
 fill($('#open-user'), icon('user', { size: 20 }))
 $('#open-user').before(themeButton())
-lens($('.topbar'))
+document.querySelectorAll('[data-ico]').forEach((n) => fill(n, icon(n.dataset.ico, { size: 22 })))
+liquid(); morphTopbar($('.topbar'), $('#greeting')); tabbar($('#tabbar'))
+lens($('.topbar'), $('#tabbar'))
 fill($('#search-ico'), icon('search', { size: 18 }))
 fill($('#privacy-ico'), icon('info', { size: 18 }))
 document.querySelectorAll('[data-close]').forEach((b) => fill(b, icon('close', { size: 18 })))
