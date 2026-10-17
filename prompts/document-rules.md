@@ -1,24 +1,20 @@
 You read a document of a shared space (house rules, rental contract, appliance manual; any language) and find the rules that the hub's devices can apply BY THEMSELVES. Reply with JSON only: {"rules":[...]}, at most 8 rules.
 
-Keep only rules a device can enforce with these triggers and actions:
-- triggers: "after_hour" (after a time of day, 0-23), "weekday" (on some days; weekend = sat, sun), "use_count" (every N uses), "stock_below" (fewer than N items), "overdue" (a rental is late).
-- actions: "lock", "unlock", "change_price" (pricePercent), "propose_purchase" (maintenance, restock, a part to replace), "notify" (tell the host), "keep_deposit".
-Skip everything a machine cannot check (e.g. "do not wash shoes", "empty the machine within 15 minutes", "write to the manager"), and fixed prices (they are already in the service).
-A closing time means "lock" at that hour AND "unlock" at the opening hour.
-Write one rule per device: if a sentence is about "the machines", make one rule for each service it applies to.
+Keep only rules a device can enforce:
+- whenKind: "after_hour" (after a time of day, whenNumber 0-23), "weekday" (whenDays; weekend = sat, sun), "counter_at" (every N uses), "stock_below" (fewer than N items), "overdue" (a rental is late).
+- doKind: "lock", "unlock", "set_price" (pricePercent for "+10%", or priceDollars), "propose_purchase" (reason: "maintenance", "filter replacement"…), "notify" (reason = message), "keep_deposit".
+Skip everything a machine cannot check (e.g. "do not wash shoes", "empty the machine within 15 minutes", "write to the manager") and the normal prices (they are already in the device).
+A closing time means "lock" at that hour AND "unlock" at the opening hour, for EACH device it applies to.
+Write one rule per device: if a sentence is about "the machines", make one rule for each device.
 
-The hub's services are listed below as `id: name (type)`. Each rule:
-- serviceId: the service the rule is about.
-- description: one short English sentence for the host, e.g. "Lock the washing machine after 10 pm".
-- triggerKind, triggerNumber, triggerDays (only for "weekday", else []), actionKind,
-- purchaseItem, purchaseQuantity, purchaseMaxDollars, pricePercent, depositDollars, message: only when needed, else null.
-Copy numbers exactly as written in the document.
+Each rule: deviceId (from the list below), description (one short English sentence for the host), whenKind, whenNumber, whenDays ([] unless "weekday"), doKind, priceDollars, pricePercent, reason, depositDollars (null when not needed). Copy numbers exactly as written.
 
-Example (services: washer: Washing machine (use), dryer: Dryer (use)), document "Open 8:00-20:00. Every 30 washes clean the washing machine filter.":
+Example (devices: washer: Washing machine, dryer: Dryer), document "Open 8:00-20:00. Every 30 washes clean the washing machine filter. Drying costs 10% more on Sundays.":
 {"rules":[
-{"serviceId":"washer","description":"Lock the washing machine after 8 pm","triggerKind":"after_hour","triggerNumber":20,"triggerDays":[],"actionKind":"lock","purchaseItem":null,"purchaseQuantity":null,"purchaseMaxDollars":null,"pricePercent":null,"depositDollars":null,"message":null},
-{"serviceId":"washer","description":"Unlock the washing machine at 8 am","triggerKind":"after_hour","triggerNumber":8,"triggerDays":[],"actionKind":"unlock","purchaseItem":null,"purchaseQuantity":null,"purchaseMaxDollars":null,"pricePercent":null,"depositDollars":null,"message":null},
-{"serviceId":"dryer","description":"Lock the dryer after 8 pm","triggerKind":"after_hour","triggerNumber":20,"triggerDays":[],"actionKind":"lock","purchaseItem":null,"purchaseQuantity":null,"purchaseMaxDollars":null,"pricePercent":null,"depositDollars":null,"message":null},
-{"serviceId":"dryer","description":"Unlock the dryer at 8 am","triggerKind":"after_hour","triggerNumber":8,"triggerDays":[],"actionKind":"unlock","purchaseItem":null,"purchaseQuantity":null,"purchaseMaxDollars":null,"pricePercent":null,"depositDollars":null,"message":null},
-{"serviceId":"washer","description":"Propose a filter cleaning every 30 washes","triggerKind":"use_count","triggerNumber":30,"triggerDays":[],"actionKind":"propose_purchase","purchaseItem":"filter cleaning","purchaseQuantity":null,"purchaseMaxDollars":null,"pricePercent":null,"depositDollars":null,"message":null}
+{"deviceId":"washer","description":"Lock the washing machine after 8 pm","whenKind":"after_hour","whenNumber":20,"whenDays":[],"doKind":"lock","priceDollars":null,"pricePercent":null,"reason":null,"depositDollars":null},
+{"deviceId":"washer","description":"Unlock the washing machine at 8 am","whenKind":"after_hour","whenNumber":8,"whenDays":[],"doKind":"unlock","priceDollars":null,"pricePercent":null,"reason":null,"depositDollars":null},
+{"deviceId":"dryer","description":"Lock the dryer after 8 pm","whenKind":"after_hour","whenNumber":20,"whenDays":[],"doKind":"lock","priceDollars":null,"pricePercent":null,"reason":null,"depositDollars":null},
+{"deviceId":"dryer","description":"Unlock the dryer at 8 am","whenKind":"after_hour","whenNumber":8,"whenDays":[],"doKind":"unlock","priceDollars":null,"pricePercent":null,"reason":null,"depositDollars":null},
+{"deviceId":"washer","description":"Propose a filter cleaning every 30 washes","whenKind":"counter_at","whenNumber":30,"whenDays":[],"doKind":"propose_purchase","priceDollars":null,"pricePercent":null,"reason":"filter cleaning","depositDollars":null},
+{"deviceId":"dryer","description":"Sunday price +10%","whenKind":"weekday","whenNumber":null,"whenDays":["sun"],"doKind":"set_price","priceDollars":null,"pricePercent":10,"reason":null,"depositDollars":null}
 ]}

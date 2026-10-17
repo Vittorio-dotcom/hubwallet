@@ -84,35 +84,25 @@ Requests take tens of seconds on a laptop: use the model only where it adds valu
 **AI server (Lapo's PC, RTX GPU):** `QVAC_URL=http://192.168.6.169:11434`, model `qwen3.5-2b`; Bearer key in env
 `QVAC_API_KEY` (shared on Telegram, never in the repo). Measured: ~1–2.5 s per answer (first one after start ~7 s).
 Serve config: `prompts/qvac.config.json` → `npx qvac serve --openai --host 0.0.0.0 --api-key-file <file>`.
-Test without the hub: `node src/ai.js service|behaviour|bundle|device|rules|ask "<text, descriptor JSON or document path>"` (`HUB_URL=...` to use a hub's services).
+Test without the hub: `node src/ai.js device|edit|rule|service|rules "<descriptor JSON, text or document path>"` (`edit` changes the demo washing machine).
 
-Functions (all `async`, throw `Error` with a message to show the user):
-- `textToService(text)` → `{ name, icon, type: access|use|rent, price (cents, per hour for rent; 0 for access), unit: use|hour, maxHours? }`
-- `textToBehaviour(text, services)` → `{ serviceId, trigger: { kind, value }, action: { kind, ... }, text }`
-  - trigger: `stock_below` value = items left · `weekday` value = `['sat','sun']` (mon..sun) · `overdue` value = hours late · `after_hour` value = 0–23 · `use_count` value = every N uses (e.g. maintenance every 50 washes)
-  - action (same names as `behaviours.js`): `propose_purchase { item, quantity?, maxAmount? (cents) }` · `change_price { percent }` (+20, -10) ·
-    `notify { message }` · `lock {}` · `unlock {}` · `keep_deposit { amount? (cents; absent = whole deposit) }`
-  - money guard: `maxAmount` / `amount` are kept only if that number is written in the host's text
-- `textToBundle(text, services)` → `[{ serviceId, hours? }]` (only ids from `services`, no access services, hours clamped to `maxHours`)
-- `deviceToService(descriptor)` (plug-and-play; descriptor = any JSON object or string: name, type, commands, sensors…) →
-  `{ service: <as textToService, with a suggested price>, behaviours: [{ trigger, action, text }] }` (0–3 rules, no `serviceId`:
-  the hub adds it after creating the service; no timed lock/unlock on access services)
-- `documentToBehaviours(text, services)` (house documents → rules) → `[{ serviceId, trigger, action, text }]` (0–8 rules the
-  devices can apply by themselves; the host confirms each one). Demo documents: `prompts/documents/*.md` (laundry rules + manuals)
-- `answerFromDocuments(question, documents)` (guest assistant, RAG) with `documents = [{ title, text }]` →
-  `{ answer, found, source }`: answer in the guest's language, only from the documents; `found:false` = "ask the host", never invented
+Functions in `src/ai.js` (all `async`, host side only, throw `Error` with a message to show the host). Device format = `docs/HOST-APP.md` §2:
+`{ id, name, icon, type: use|rent|access, price (HUSD cents), unit, commands, rules: [{ when: { kind, value }, do: { kind, ... } }], version }`
+- `when.kind`: `after_hour` (0–23) · `weekday` (`['sat','sun']`) · `stock_below` (N) · `counter_at` (every N uses) · `overdue` (hours late)
+- `do.kind`: `lock` · `unlock` · `set_price { price }` (cents; "+20%" is computed by the code from the device price) · `notify { text }` · `propose_purchase { reason }` · `keep_deposit { amount? }`
+- `deviceToService(descriptor)` → a device config (version 1) with a suggested price and 0–3 rules (plug-and-play, `POST /api/devices`). lock/unlock rules only if the device has those commands; doors get no rules.
+- `editDevice(text, currentConfig)` → the proposed config (`POST /api/devices/:id/edit`). The model returns only the changes (new name, new price or %, rules to add, rule numbers to remove); the code applies them, so `id`, `commands` and `version` never change (the hub increments `version` on Apply). Throws "I did not understand what to change…" if nothing changes.
+- `textToRule(text, device)` → `{ when, do, text }` · `textToService(text)` → a device config from a sentence ("dryer, 2 dollars a cycle").
+- `documentToRules(text, devices)` → `[{ deviceId, when, do, text }]` (house rules / manual → rules the devices can apply; demo documents in `prompts/documents/`).
+- Money guard: a price, deposit or amount from the model is kept only if that number is written in the host's text; percentages are computed by the code; "free"/"gratis" without numbers = 0.
 
-Hub routes (for `src/hub.js`):
+Device layer (#34) usage, e.g. in the routes of `docs/HOST-APP.md` §4:
 ```js
-import { textToService, textToBehaviour, textToBundle, deviceToService, documentToBehaviours, answerFromDocuments } from './ai.js'
-app.post('/api/ai/service', owner, wrap(async (req, res) => res.json(await textToService(req.body?.text))))
-app.post('/api/ai/behaviour', owner, wrap(async (req, res) => res.json(await textToBehaviour(req.body?.text, state.services))))
-app.post('/api/ai/device', owner, wrap(async (req, res) => res.json(await deviceToService(req.body?.descriptor))))
-app.post('/api/ai/document-rules', owner, wrap(async (req, res) => res.json(await documentToBehaviours(req.body?.text, state.services))))
-app.post('/api/ai/ask', wrap(async (req, res) => res.json(await answerFromDocuments(req.body?.question, state.documents)))) // public; state.documents = [{ title, text }] uploaded by the host
-app.post('/api/ai/bundle', wrap(async (req, res) => res.json(await textToBundle(req.body?.text, state.services))))
+import { deviceToService, editDevice } from './ai.js'
+r.post('/devices', owner, wrap(async (req) => ({ proposed: await deviceToService(req.body?.descriptor) })))
+r.post('/devices/:id/edit', owner, wrap(async (req) => { const current = loadDevice(req.params.id); const proposed = await editDevice(req.body?.text, current); return { proposed, diff: diff(current, proposed) } }))
 ```
-The routes only return a proposal; the page shows it and the human confirms (e.g. `POST /api/services` with the JSON).
+Measured on the AI PC: edit ~1.3–3.5 s, plug-and-play ~2.5–5 s, document → rules ~10 s.
 
 ## Rules (from the organisers — breaking them costs points)
 - **No force-push, no rebase, no amend, on any branch.** Use `git pull --no-rebase`, small commits, push often.
