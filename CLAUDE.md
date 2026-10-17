@@ -54,7 +54,7 @@ Pages are served by both servers from `web/`. Env: `HOUR_MS` (rental hour length
 
 ## Hub API (contract — change it only together with TASKS.md + a note here)
 
-> ⚠️ **Being rewritten for architecture C** (TASKS.md #1–7). The routes below describe the removed first version and will be replaced by Vittorio's Claude as the new hub is built. Build against the new section once it appears.
+> ⚠️ **Architecture C payment layer is in: see `API_usage.md`** (hub-core routes `/api/payments`, `/api/to-sign`, `/api/transfers`, payer wallet `/api/check` + `/api/pay-request`). The service routes below (`/api/services`, `/api/orders`) are from the removed first version: the service layer rebuilds them on top of `hub-core` (example in `API_usage.md` §5).
 Amounts are integers in **HUSD cents** (precision 2). Owner routes need header `X-Hub-Key`.
 
 Public (guests):
