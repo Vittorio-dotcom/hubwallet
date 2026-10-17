@@ -1,9 +1,13 @@
-// HubWallet host app logic — example data for now (docs/HOST-APP.md).
-// When the device layer exists on the hub, the EXAMPLE parts are replaced by calls to:
-//   hub (owner key):  GET /api/wallet, GET /api/to-sign, POST /api/transfers (sweep),
-//                     GET /api/devices, POST /api/devices, POST /api/devices/:id/edit, POST /api/devices/:id/apply
-//   host wallet:      GET /api/me (src/guest.js with WALLET=provider)
-// The AI never saves anything: it proposes a JSON, the code validates it, the host applies it.
+// HubWallet host app logic.
+// Real APIs (API_usage.md, src/devices.js), all on the hub with the owner key (X-Hub-Key), kept on this device:
+//   GET  /api/hub/info · GET /api/wallet · GET /api/services (dollarId) · GET /api/devices
+//   POST /api/devices/chat {messages} → {reply, proposed?} · POST /api/devices {config}
+//   POST /api/devices/:id/edit {text} → {proposed, diff} · POST /api/devices/:id/apply {config}
+//   POST /api/devices/clock {hour|null} (demo clock) · GET /api/to-sign?status=pending · POST /api/to-sign/:id/reject
+//   POST /api/transfers {assetId, amount, invoice, description} → To sign (sweep)
+// Host wallet cards: payer wallet API of src/guest.js (WALLET=provider), GET /api/me, POST /api/receive.
+// With no hub connected the page shows example data (marked) so it can be tried.
+// The AI never saves anything: it proposes, the hub validates, the host applies. Spending waits for the signer.
 
 const $ = (s) => document.querySelector(s)
 const money = (cents) => (Number(cents || 0) / 100).toFixed(2)
@@ -19,246 +23,241 @@ function el (tag, props = {}, ...children) {
   for (const c of children.flat()) if (c !== null && c !== undefined && c !== false) n.append(c instanceof Node ? c : String(c))
   return n
 }
-
-// ---------- example data, in the format of docs/HOST-APP.md ----------
-const state = {
-  wallets: [{ label: 'My wallet', husd: 4250, sats: 61200, address: 'tb1p…host' }],
-  hubs: [
-    { url: 'example-a', name: 'Lavanderia', earned: 1150, sats: 8800, freeUtxos: 4,
-      toSign: [],
-      devices: [
-        { id: 'washer', name: 'Washing machine', icon: '🧺', type: 'use', price: 200, unit: 'wash', commands: ['start', 'stop'], rules: [], version: 1, state: { status: 'idle' }, earned: 800 },
-        { id: 'dryer', name: 'Dryer', icon: '🌀', type: 'use', price: 150, unit: 'cycle', commands: ['start', 'stop'],
-          rules: [{ when: { kind: 'after_hour', value: 22 }, do: { kind: 'lock' } }], version: 2, state: { status: 'running', until: Date.now() + 40 * 60000 }, earned: 350 }
-      ] }
-  ]
+const load_ = (k, d) => { try { return JSON.parse(localStorage.getItem(k)) ?? d } catch { return d } }
+const save_ = (k, v) => { try { localStorage.setItem(k, JSON.stringify(v)) } catch {} }
+async function call (url, { key, body, method } = {}) {
+  const headers = {}
+  if (key) headers['X-Hub-Key'] = key
+  if (body !== undefined) headers['Content-Type'] = 'application/json'
+  const r = await fetch(url, { method: method || (body !== undefined ? 'POST' : 'GET'), headers, body: body !== undefined ? JSON.stringify(body) : undefined })
+  const j = await r.json().catch(() => ({}))
+  if (!r.ok) throw new Error(j.error || `Request failed (${r.status})`)
+  return j
 }
-let hubIndex = 0; let walletIndex = 0
-const hub = () => state.hubs[hubIndex]
+const normUrl = (v) => {
+  let u = String(v || '').trim().replace(/\/$/, '')
+  if (u && !/^https?:\/\//.test(u)) u = 'http://' + u
+  return /^https?:\/\/[^/\s]+$/.test(u) ? u : null
+}
 
-// ---------- rules shown in words ----------
+// ---------- configuration kept on this device ----------
+let hubCfg = load_('hostHubs', []) // [{ url, key }]  the owner key never leaves this device except to its hub
+let walletCfg = load_('hostWallets', []) // [{ url, label }]  src/guest.js WALLET=provider
+let hubIndex = Math.min(load_('hostHubIndex', 0), Math.max(0, hubCfg.length - 1))
+let walletIndex = 0
+
+// ---------- example data (only when no hub is connected) ----------
+const EXAMPLE = {
+  wallets: [{ label: 'Example wallet', me: { address: 'tb1p…host', btc: { vanilla: { spendable: 61200 } }, assets: { nia: [{ ticker: DOLLAR, assetId: 'rgb:example', balance: { spendable: 4250 } }] } } }],
+  hubs: [{ url: 'example', name: 'Lavanderia', dollarId: 'rgb:example', wallet: { btc: { vanilla: { spendable: 8800 } }, freeColorableUtxos: 4, assets: { nia: [{ assetId: 'rgb:example', balance: { spendable: 1150 } }] } },
+    toSign: [],
+    devices: [
+      { id: 'washer', name: 'Washing machine', icon: '🧺', type: 'use', price: 300, unit: 'wash', commands: ['start', 'stop'], rules: [], version: 1, state: { status: 'idle' }, earned: 900, uses: 3 },
+      { id: 'dryer', name: 'Dryer', icon: '🌀', type: 'use', price: 200, unit: 'cycle', commands: ['start', 'stop'], rules: [{ when: { kind: 'after_hour', value: 22 }, do: { kind: 'lock' } }], version: 2, state: { status: 'running', until: Date.now() + 40 * 60000 }, earned: 400, uses: 2 }
+    ] }]
+}
+const example = () => hubCfg.length === 0
+
+// ---------- live data ----------
+let hubs = [] // [{ url, key, name, dollarId, wallet, devices, toSign, error? }]
+let wallets = [] // [{ url, label, me?, error? }]
+const hub = () => hubs[hubIndex]
+
+async function loadHub ({ url, key }) {
+  try {
+    const [info, sv, wallet, devices, toSign] = await Promise.all([
+      call(url + '/api/hub/info'), call(url + '/api/services'), call(url + '/api/wallet', { key }),
+      call(url + '/api/devices', { key }), call(url + '/api/to-sign?status=pending', { key })])
+    return { url, key, name: info.name || sv.name, dollarId: sv.dollarId, wallet, devices, toSign }
+  } catch (e) { return { url, key, name: url.replace(/^https?:\/\//, ''), devices: [], toSign: [], error: e.message } }
+}
+async function loadWallet (w) {
+  try { return { ...w, me: await call(w.url + '/api/me') } } catch (e) { return { ...w, error: e.message } }
+}
+async function refresh () {
+  if (example()) { hubs = structuredClone(EXAMPLE.hubs); wallets = structuredClone(EXAMPLE.wallets) } else {
+    hubs = await Promise.all(hubCfg.map(loadHub))
+    wallets = await Promise.all(walletCfg.map(loadWallet))
+  }
+  render()
+}
+
+// ---------- rules in words ----------
 const WHEN = { after_hour: (v) => `after ${v}:00`, weekday: (v) => `on ${v}`, stock_below: (v) => `when stock is below ${v}`, counter_at: (v) => `every ${v} uses`, overdue: () => 'when overdue' }
 const DO = { lock: () => 'lock it', unlock: () => 'unlock it', set_price: (d) => `set the price to ${money(d.price)} ${DOLLAR}`, notify: () => 'notify me', propose_purchase: (d) => `propose a purchase${d.reason ? ' (' + d.reason + ')' : ''}`, keep_deposit: () => 'keep the deposit' }
 const ruleText = (r) => `${(WHEN[r.when?.kind] || (() => r.when?.kind))(r.when?.value)}: ${(DO[r.do?.kind] || (() => r.do?.kind))(r.do || {})}`
 
-// ---------- validation by code (the AI's proposal is never trusted as is) ----------
-const RULE_WHEN = Object.keys(WHEN); const RULE_DO = Object.keys(DO)
-function validate (cfg, current) {
-  const errors = []
-  if (current && cfg.id !== current.id) errors.push('The device id cannot change.')
-  if (!['use', 'rent', 'access'].includes(cfg.type)) errors.push('Unknown device type.')
-  if (!Number.isInteger(cfg.price) || cfg.price < 0) errors.push('The price must be a whole number of cents.')
-  for (const r of cfg.rules || []) {
-    if (!RULE_WHEN.includes(r.when?.kind)) errors.push(`Unknown rule condition: ${r.when?.kind}`)
-    if (!RULE_DO.includes(r.do?.kind)) errors.push(`Unknown rule action: ${r.do?.kind}`)
-  }
-  return errors
-}
-function diff (a, b) {
-  const out = []
-  for (const k of ['name', 'icon', 'type', 'price', 'unit']) if (a[k] !== b[k]) out.push({ field: k, from: a[k], to: b[k] })
-  const ra = (a.rules || []).map(ruleText); const rb = (b.rules || []).map(ruleText)
-  for (const r of rb) if (!ra.includes(r)) out.push({ field: 'rule', to: r })
-  for (const r of ra) if (!rb.includes(r)) out.push({ field: 'rule', from: r })
-  return out
-}
-
-// ---------- example AI (stands in for the hub's QVAC model) ----------
-// Understands a few phrasings so the flow can be tried; the real one is the hub's /api/devices/:id/edit.
-function exampleEdit (text, cur) {
-  const t = text.toLowerCase(); const next = structuredClone(cur); delete next.state; delete next.earned
-  const p = t.match(/(\d+(?:[.,]\d{1,2})?)/)
-  if (p && /(price|prezzo|cost|raise|lower|alza|abbassa|€|husd|\d[.,]\d)/.test(t)) next.price = Math.round(parseFloat(p[1].replace(',', '.')) * 100)
-  const h = t.match(/after\s*(\d{1,2})|dopo le\s*(\d{1,2})/)
-  if (h && /(lock|blocc)/.test(t)) next.rules = [...(next.rules || []).filter((r) => r.when.kind !== 'after_hour'), { when: { kind: 'after_hour', value: Number(h[1] || h[2]) }, do: { kind: 'lock' } }]
-  const c = t.match(/every\s*(\d+)|ogni\s*(\d+)/)
-  if (c && /(maint|manut)/.test(t)) next.rules = [...(next.rules || []), { when: { kind: 'counter_at', value: Number(c[1] || c[2]) }, do: { kind: 'propose_purchase', reason: 'maintenance' } }]
-  if (/(remove|togli|elimina).*(rule|regol)/.test(t)) next.rules = []
-  return next
-}
-function exampleDevice (descriptorText) {
-  let d = {}; try { d = JSON.parse(descriptorText) } catch { d = { name: descriptorText.slice(0, 30) } }
-  const name = String(d.name || 'New device').slice(0, 40)
-  const id = name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '') || 'device'
-  const icon = /dry|asciug/i.test(name + (d.type || '')) ? '🌀' : /wash|lavat/i.test(name + (d.type || '')) ? '🧺' : '🧩'
-  return { id, name, icon, type: 'use', price: 150, unit: 'cycle', commands: Array.isArray(d.commands) ? d.commands : ['start', 'stop'], rules: [], version: 1 }
-}
-
 // ---------- rendering ----------
+const husdOf = (assets, id) => (assets?.nia || []).find((a) => (id ? a.assetId === id : a.ticker === DOLLAR))?.balance?.spendable || 0
 function render () {
-  // wallets
-  const cards = state.wallets.map((w) => el('div', { class: 'wcard', role: 'group', 'aria-label': w.label },
-    el('span', { class: 'label' }, w.label),
-    el('span', {}, el('span', { class: 'amount' }, money(w.husd)), ' ', el('span', { class: 'unit' }, DOLLAR)),
-    el('span', { class: 'hint' }, `${w.sats.toLocaleString('en')} sats · receives your hubs' earnings`)))
-  cards.push(el('button', { class: 'wcard add', type: 'button', on: { click: () => alertIn('#hub-card', 'Adding a host wallet connects a src/guest.js wallet (WALLET=provider). Coming with the real API.') } },
-    el('strong', { style: 'font-size:22px' }, '+ Add wallet'), el('span', { class: 'hint' }, 'Your personal WDK wallet')))
+  $('#demo-tag').hidden = !example()
+  // host wallet cards
+  const cards = wallets.map((w) => w.error
+    ? el('div', { class: 'wcard off' }, el('span', { class: 'label' }, w.label), el('strong', {}, 'Not reachable'), el('span', { class: 'small' }, w.url),
+      el('button', { class: 'btn', type: 'button', on: { click: () => { walletCfg = walletCfg.filter((x) => x.url !== w.url); save_('hostWallets', walletCfg); refresh() } } }, 'Remove'))
+    : el('div', { class: 'wcard', role: 'group', 'aria-label': w.label },
+      el('span', { class: 'label' }, w.label),
+      el('span', {}, el('span', { class: 'amount' }, money(husdOf(w.me.assets))), ' ', el('span', { class: 'unit' }, DOLLAR)),
+      el('span', { class: 'hint' }, `${(w.me.btc?.vanilla?.spendable ?? 0).toLocaleString('en')} sats · receives your hubs' earnings`)))
+  cards.push(el('button', { class: 'wcard add', type: 'button', on: { click: () => show('add-wallet') } },
+    el('strong', { style: 'font-size:22px' }, wallets.length ? '+ Add wallet' : 'Connect your wallet'), el('span', { class: 'hint' }, 'Your personal HubWallet (WDK) wallet')))
   $('#wallets').replaceChildren(...cards)
   $('#dots').replaceChildren(...cards.map((_, i) => el('span', { class: i === walletIndex ? 'on' : '' })))
 
-  // hubs
-  $('#hub-chips').replaceChildren(...state.hubs.map((h, i) => el('button', { class: 'chip', type: 'button', role: 'tab', 'aria-selected': String(i === hubIndex), on: { click: () => { hubIndex = i; render() } } }, h.name)),
+  // hub chips
+  $('#hub-chips').replaceChildren(...hubs.map((h, i) => el('button', { class: 'chip', type: 'button', role: 'tab', 'aria-selected': String(i === hubIndex), on: { click: () => { hubIndex = i; save_('hostHubIndex', i); render() } } }, h.name)),
     el('button', { class: 'chip', type: 'button', on: { click: () => show('add-hub') } }, '+ Add hub'))
   const h = hub()
+  if (!h) { $('#hub-card').replaceChildren(); $('#to-sign').replaceChildren(); $('#devices').replaceChildren(); return }
+  if (h.error) {
+    $('#hub-card').replaceChildren(el('div', { class: 'notice bad' }, `${h.url}: ${h.error}`),
+      el('button', { class: 'btn', type: 'button', on: { click: () => removeHub(hubIndex) } }, 'Remove this hub'))
+    $('#to-sign').replaceChildren(); $('#devices').replaceChildren(); return
+  }
+  const earned = husdOf(h.wallet?.assets, h.dollarId)
   $('#hub-card').replaceChildren(el('div', { class: 'card' },
     el('div', { class: 'row' }, el('div', { class: 'grow' }, el('span', { class: 'label' }, 'Earnings on this hub'),
-      el('div', {}, el('span', { style: 'font-size:28px;font-weight:700' }, money(h.earned)), ' ', DOLLAR)),
-      el('button', { class: 'btn', type: 'button', disabled: h.earned <= 0 || h.toSign.length > 0, on: { click: sweep } }, 'Sweep to my wallet')),
-    el('p', { class: 'small muted' }, `${h.sats.toLocaleString('en')} sats for fees · ${h.freeUtxos} free UTXOs · the hub can receive but never spend`)))
+      el('div', {}, el('span', { style: 'font-size:28px;font-weight:700' }, money(earned)), ' ', DOLLAR)),
+      el('button', { class: 'btn', type: 'button', disabled: earned <= 0 || h.toSign.length > 0 || !wallets.some((w) => !w.error), on: { click: () => sweep(h, earned) } }, 'Sweep to my wallet')),
+    el('p', { class: 'small muted' }, `${(h.wallet?.btc?.vanilla?.spendable ?? 0).toLocaleString('en')} sats for fees · ${h.wallet?.freeColorableUtxos ?? 0} free UTXOs · the hub can receive but never spend`)))
 
-  // to sign
   $('#to-sign').replaceChildren(...h.toSign.map((it) => el('div', { class: 'card warn-card' },
     el('span', { class: 'label' }, 'Waiting for your signature'),
-    el('strong', {}, it.summary),
+    el('strong', {}, it.description || it.summary || it.kind),
+    it.amount ? el('span', { class: 'small' }, `${money(it.amount)} ${DOLLAR}`) : null,
     el('p', { class: 'small muted' }, 'Approve it on your signer (the host phone). From here you can only reject it.'),
-    el('div', { class: 'row' }, el('button', { class: 'btn', type: 'button', on: { click: () => { h.toSign = h.toSign.filter((x) => x !== it); render() } } }, 'Reject'),
-      el('button', { class: 'btn primary', type: 'button', on: { click: () => signExample(it) } }, 'Simulate signer approval')))))
+    el('button', { class: 'btn', type: 'button', on: { click: () => reject(h, it) } }, 'Reject'))))
 
-  // devices
   $('#devices').replaceChildren(...(h.devices.length ? h.devices.map((d) => {
-    const running = d.state?.status === 'running'
+    const st = d.state?.status || 'idle'
     return el('button', { class: 'tile', type: 'button', on: { click: () => openDevice(d) }, 'aria-label': d.name },
-      el('span', { class: 'ic', 'aria-hidden': 'true' }, d.icon), el('span', { class: 'name' }, d.name),
+      el('span', { class: 'ic', 'aria-hidden': 'true' }, d.icon || '🧩'), el('span', { class: 'name' }, d.name),
       el('span', { class: 'price' }, `${money(d.price)} ${DOLLAR} / ${d.unit}`),
-      el('span', { class: `pill ${running ? 'busy' : 'free'}` }, running ? 'Running' : d.state?.status === 'locked' ? 'Locked' : 'Ready'),
-      el('span', { class: 'where' }, `${d.rules.length} rule${d.rules.length === 1 ? '' : 's'} · earned ${money(d.earned || 0)}`))
+      el('span', { class: `pill ${st === 'running' ? 'busy' : st === 'locked' ? 'on' : 'free'}` }, st === 'running' ? 'Running' : st === 'locked' ? 'Locked' : 'Ready'),
+      el('span', { class: 'where' }, `${(d.rules || []).length} rule${(d.rules || []).length === 1 ? '' : 's'} · earned ${money(d.earned || 0)}`))
   }) : [el('div', { class: 'empty', style: 'grid-column:1/-1' }, 'No devices yet. Add one below.')]))
 }
-function alertIn (sel, text) { $(sel).append(el('div', { class: 'notice' }, text)) }
 
-// ---------- sweep: hub → host wallet, waits for the signer ----------
-function sweep () {
-  const h = hub()
-  h.toSign.push({ id: 'ts-' + Date.now(), kind: 'send', amount: h.earned, summary: `Send ${money(h.earned)} ${DOLLAR} from ${h.name} to your wallet` })
-  render()
+// ---------- spending: sweep and reject (signing happens on the signer) ----------
+async function sweep (h, amount) {
+  const w = wallets.find((x) => !x.error)
+  try {
+    if (example()) { h.toSign.push({ id: 'ex', description: `Send ${money(amount)} ${DOLLAR} from ${h.name} to your wallet`, amount }); render(); return }
+    // the host's wallet makes an invoice for "any asset" (it may never have seen HUSD), the hub prepares the transfer
+    const inv = await call(w.url + '/api/receive', { body: { amount, description: `Earnings from ${h.name}` } })
+    await call(h.url + '/api/transfers', { key: h.key, body: { assetId: h.dollarId, amount, invoice: inv.invoice, description: `Sweep ${money(amount)} ${DOLLAR} from ${h.name} to ${w.label}` } })
+    await refresh()
+  } catch (e) { $('#hub-card').append(el('div', { class: 'notice bad' }, e.message)) }
 }
-function signExample (it) {
-  const h = hub(); h.toSign = h.toSign.filter((x) => x !== it)
-  state.wallets[0].husd += it.amount; h.earned -= it.amount; render()
+async function reject (h, it) {
+  try { if (!example()) await call(`${h.url}/api/to-sign/${encodeURIComponent(it.id)}/reject`, { key: h.key, body: {} }); else h.toSign = []; await refresh() } catch (e) { $('#to-sign').append(el('div', { class: 'notice bad' }, e.message)) }
 }
 
-// ---------- devices ----------
+// ---------- proposals: shown as differences, applied only by the host ----------
+function proposal (cur, next, diffList, onApply) {
+  return el('div', { class: 'card' },
+    el('span', { class: 'label' }, cur ? 'Proposed changes' : 'Proposed configuration'),
+    cur ? (diffList.length
+      ? el('ul', { class: 'diff' }, ...diffList.map((c) => el('li', { class: c.from === undefined ? 'add' : c.to === undefined ? 'del' : 'mod' },
+          c.field === 'rule' || c.field === 'rules' ? (c.to ? `+ rule: ${typeof c.to === 'string' ? c.to : ruleText(c.to)}` : `− rule: ${typeof c.from === 'string' ? c.from : ruleText(c.from)}`)
+            : `${c.field}: ${c.field === 'price' ? money(c.from) : c.from} → ${c.field === 'price' ? money(c.to) : c.to}`)))
+      : el('p', { class: 'small muted' }, 'No changes.'))
+      : el('div', { class: 'stack' },
+        el('div', { class: 'row' }, el('span', { style: 'font-size:32px' }, next.icon || '🧩'), el('div', { class: 'grow' }, el('strong', {}, next.name), el('div', { class: 'small muted' }, `${money(next.price)} ${DOLLAR} / ${next.unit}`))),
+        (next.rules || []).length ? el('ul', { class: 'rules' }, ...next.rules.map((r) => el('li', {}, ruleText(r)))) : el('p', { class: 'small muted' }, 'No rules.')),
+    el('button', { class: 'btn primary block', type: 'button', disabled: cur && !diffList.length, on: { click: onApply } }, 'Apply'))
+}
+
+// ---------- a device: details, edit with the AI, demo clock ----------
 let current = null
-function openDevice (d) {
-  current = d
-  $('#device-title').textContent = d.name
-  $('#edit-text').value = ''; $('#edit-out').replaceChildren()
-  renderDevice()
-  show('device')
-}
+function openDevice (d) { current = d; $('#device-title').textContent = d.name; $('#edit-text').value = ''; $('#edit-out').replaceChildren(); renderDevice(); show('device') }
 function renderDevice () {
   const d = current
   $('#device-body').replaceChildren(
-    el('div', { class: 'row' }, el('span', { style: 'font-size:40px', 'aria-hidden': 'true' }, d.icon),
-      el('div', { class: 'grow' }, el('strong', {}, d.name), el('div', { class: 'small muted' }, `${money(d.price)} ${DOLLAR} / ${d.unit} · version ${d.version}`))),
+    el('div', { class: 'row' }, el('span', { style: 'font-size:40px', 'aria-hidden': 'true' }, d.icon || '🧩'),
+      el('div', { class: 'grow' }, el('strong', {}, d.name), el('div', { class: 'small muted' }, `${money(d.price)} ${DOLLAR} / ${d.unit} · version ${d.version} · ${d.uses ?? 0} uses`))),
     el('span', { class: 'label' }, 'Rules'),
-    d.rules.length ? el('ul', { class: 'rules' }, ...d.rules.map((r) => el('li', {}, ruleText(r)))) : el('p', { class: 'small muted' }, 'No rules yet.'))
-  const { state: _s, earned: _e, ...cfg } = d
+    (d.rules || []).length ? el('ul', { class: 'rules' }, ...d.rules.map((r) => el('li', {}, ruleText(r)))) : el('p', { class: 'small muted' }, 'No rules yet.'),
+    el('a', { class: 'small', href: `${example() ? '' : hub().url}/device.html?id=${encodeURIComponent(d.id)}`, target: '_blank', rel: 'noopener' }, 'Open the device screen'),
+    example() ? null : el('div', { class: 'row' }, el('span', { class: 'small muted grow' }, 'Demo clock (to show time rules)'),
+      el('select', { class: 'input', 'aria-label': 'Pretend it is', on: { change: (e) => setClock(e.target.value) } },
+        el('option', { value: '' }, 'real time'), ...Array.from({ length: 24 }, (_, i) => el('option', { value: String(i) }, `${i}:00`)))))
+  const { state: _s, earned: _e, uses: _u, basePrice: _b, lastTriggered: _l, ...cfg } = d
   $('#device-json').textContent = JSON.stringify(cfg, null, 2)
 }
-function proposal (cur, next, onApply) {
-  const errors = validate(next, cur)
-  const changes = cur ? diff(cur, next) : []
-  return el('div', { class: 'card' },
-    el('span', { class: 'label' }, cur ? 'Proposed changes' : 'Proposed configuration'),
-    errors.length ? el('div', { class: 'notice bad' }, errors.join(' ')) : null,
-    cur ? (changes.length
-      ? el('ul', { class: 'diff' }, ...changes.map((c) => el('li', { class: c.from === undefined ? 'add' : c.to === undefined ? 'del' : 'mod' },
-          c.field === 'rule' ? (c.to ? `+ rule: ${c.to}` : `− rule: ${c.from}`)
-            : `${c.field}: ${c.field === 'price' ? money(c.from) : c.from} → ${c.field === 'price' ? money(c.to) : c.to}`)))
-      : el('p', { class: 'small muted' }, 'No changes understood. Try "raise the price to 2.50 and lock it after 22:00".'))
-      : el('pre', { class: 'mono json' }, JSON.stringify(next, null, 2)),
-    el('button', { class: 'btn primary block', type: 'button', disabled: errors.length > 0 || (cur && !changes.length), on: { click: onApply } }, 'Apply'))
+async function setClock (v) {
+  try { await call(hub().url + '/api/devices/clock', { key: hub().key, body: { hour: v === '' ? null : Number(v) } }); await refresh() } catch (e) { $('#edit-out').replaceChildren(el('div', { class: 'notice bad' }, e.message)) }
 }
-$('#edit-form').addEventListener('submit', (e) => {
+$('#edit-form').addEventListener('submit', async (e) => {
   e.preventDefault()
   const text = $('#edit-text').value.trim(); if (!text) return
-  const next = exampleEdit(text, current)
-  $('#edit-out').replaceChildren(proposal(current, next, () => {
-    Object.assign(current, next, { version: current.version + 1 })
-    $('#edit-out').replaceChildren(el('div', { class: 'notice ok' }, `Saved as version ${current.version}.`))
-    renderDevice(); render()
-  }))
+  if (example()) { $('#edit-out').replaceChildren(el('div', { class: 'notice' }, 'Connect a hub to edit devices with its AI.')); return }
+  $('#edit-out').replaceChildren(el('p', { class: 'small muted' }, 'The hub\'s AI is thinking…'))
+  try {
+    const h = hub()
+    const r = await call(`${h.url}/api/devices/${encodeURIComponent(current.id)}/edit`, { key: h.key, body: { text } })
+    $('#edit-out').replaceChildren(proposal(current, r.proposed, r.diff || [], async () => {
+      try {
+        const saved = await call(`${h.url}/api/devices/${encodeURIComponent(current.id)}/apply`, { key: h.key, body: { config: r.proposed } })
+        await refresh(); current = hub().devices.find((x) => x.id === saved.id) || current
+        $('#edit-out').replaceChildren(el('div', { class: 'notice ok' }, `Saved as version ${saved.version}.`)); renderDevice()
+      } catch (err) { $('#edit-out').replaceChildren(el('div', { class: 'notice bad' }, err.message)) }
+    }))
+  } catch (err) { $('#edit-out').replaceChildren(el('div', { class: 'notice bad' }, err.message)) }
 })
-// ---------- add a device: guided chat ----------
-// Real version: POST /api/devices/chat { messages } → { reply, proposed? } (hub AI, docs/HOST-APP.md §4).
-// Example version below: it fills the configuration slot by slot and asks for what is missing.
-let draft = null; let chat = []
-const ASK = {
-  kind: 'Hi! What device do you want to connect? For example "a dryer in the back room".',
-  price: (d) => `How much should one ${d.unit} of the ${d.name.toLowerCase()} cost, in ${DOLLAR}?`,
-  rules: (d) => `Any rules for the ${d.name.toLowerCase()}? For example "lock it after 22:00" or "maintenance every 50 uses". Say "no" if none.`
-}
-const KNOWN = [
-  { re: /dryer|asciug/, name: 'Dryer', icon: '🌀', unit: 'cycle' },
-  { re: /wash|lavatr/, name: 'Washing machine', icon: '🧺', unit: 'wash' },
-  { re: /coffee|caff/, name: 'Coffee machine', icon: '☕', unit: 'cup' },
-  { re: /iron|ferro/, name: 'Iron', icon: '🧺', unit: 'use' },
-  { re: /charg|ricaric|colonn/, name: 'Charging station', icon: '🔌', unit: 'hour' }
-]
-function say (who, text) {
-  chat.push({ who, text })
-  $('#dev-chat').replaceChildren(...chat.map((m) => el('div', { class: `msg ${m.who}` }, el('span', { class: 'by' }, m.who === 'ai' ? 'Hub AI · local' : 'You'), m.text)))
+
+// ---------- add a device: guided chat with the hub's AI ----------
+let messages = []
+function drawChat () {
+  $('#dev-chat').replaceChildren(...messages.map((m) => el('div', { class: `msg ${m.role === 'ai' ? 'ai' : 'me'}` }, el('span', { class: 'by' }, m.role === 'ai' ? 'Hub AI · local' : 'You'), m.text)))
   $('#dev-chat').scrollTop = $('#dev-chat').scrollHeight
 }
-// One question at a time: stage = 'kind' → 'price' → 'rules' → 'done'.
-let stage = 'kind'
-function ask () {
-  if (stage === 'kind') return say('ai', ASK.kind)
-  if (stage === 'price') return say('ai', ASK.price(draft))
-  if (stage === 'rules') return say('ai', ASK.rules(draft))
-  say('ai', 'Here is the configuration I propose. Check it and apply it, or tell me what to change.')
-  showDraft()
-}
-function showDraft () {
-  $('#add-dev-out').replaceChildren(proposal(null, draft, () => {
-    hub().devices.push({ ...draft, state: { status: 'idle' }, earned: 0 })
-    show(null); render()
-  }))
-}
-function understand (text) {
-  const t = text.toLowerCase()
-  if (stage === 'kind') {
-    const k = KNOWN.find((x) => x.re.test(t))
-    const name = k ? k.name : text.replace(/^(a|an|the|un|una|il|la)\s+/i, '').split(/[,.]/)[0].trim().slice(0, 30)
-    if (!name) return
-    let id = name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '') || 'device'
-    if (hub().devices.some((d) => d.id === id)) id += '-' + (hub().devices.length + 1)
-    draft = { id, name: name[0].toUpperCase() + name.slice(1), icon: k?.icon || '🧩', type: 'use', price: null, unit: k?.unit || 'use', commands: ['start', 'stop'], rules: [], version: 1 }
-    stage = 'price'
-  }
-  if (stage === 'price') { // the price may already be in the first sentence ("a dryer at 1.50")
-    const p = t.match(/(\d+(?:[.,]\d{1,2})?)\s*(husd|\$|€|dollar|euro)?/)
-    if (p && !/(after|dopo|every|ogni)\s*\d/.test(t)) { draft.price = Math.round(parseFloat(p[1].replace(',', '.')) * 100); stage = 'rules'; return }
-    return
-  }
-  if (stage === 'rules') { draft = { ...exampleEdit(text, draft), version: 1 }; stage = 'done'; return }
-  if (stage === 'done') { draft = { ...exampleEdit(text, draft), version: 1 } } // later edits to the proposal
-}
 $('#add-device').onclick = () => {
-  draft = null; chat = []; stage = 'kind'
+  messages = [{ role: 'ai', text: 'Hi! What device do you want to connect? For example "a dryer, 2 dollars per cycle".' }]
   $('#add-dev-out').replaceChildren(); $('#dev-chat-text').value = ''
-  ask(); show('add-dev'); $('#dev-chat-text').focus()
+  drawChat(); show('add-dev'); $('#dev-chat-text').focus()
 }
-$('#dev-chat-form').addEventListener('submit', (e) => {
+$('#dev-chat-form').addEventListener('submit', async (e) => {
   e.preventDefault()
   const text = $('#dev-chat-text').value.trim(); if (!text) return
   $('#dev-chat-text').value = ''
-  say('me', text)
-  const before = stage
-  understand(text)
-  if (stage === before && before !== 'done') say('ai', 'Sorry, I did not get that.')
-  if (stage === 'done' && before === 'done') { say('ai', 'Updated. Check the proposal below.'); showDraft() } else ask()
+  messages.push({ role: 'host', text }); drawChat()
+  if (example()) { messages.push({ role: 'ai', text: 'Connect a hub to add devices with its AI (this page is showing example data).' }); drawChat(); return }
+  messages.push({ role: 'ai', text: '…' }); drawChat()
+  try {
+    const h = hub()
+    const r = await call(h.url + '/api/devices/chat', { key: h.key, body: { messages: messages.slice(0, -1) } })
+    messages[messages.length - 1] = { role: 'ai', text: r.reply || 'Here is my proposal.' }; drawChat()
+    if (r.proposed) {
+      $('#add-dev-out').replaceChildren(proposal(null, r.proposed, [], async () => {
+        try { await call(h.url + '/api/devices', { key: h.key, body: { config: r.proposed } }); show(null); await refresh() } catch (err) { $('#add-dev-out').append(el('div', { class: 'notice bad' }, err.message)) }
+      }))
+    }
+  } catch (err) { messages[messages.length - 1] = { role: 'ai', text: `Sorry: ${err.message}` }; drawChat() }
 })
 
-// ---------- hubs ----------
-$('#add-hub-form').addEventListener('submit', (e) => {
+// ---------- hubs and wallets ----------
+$('#add-hub-form').addEventListener('submit', async (e) => {
   e.preventDefault()
-  let url = $('#hub-url').value.trim().replace(/\/$/, ''); if (!/^https?:\/\//.test(url)) url = 'http://' + url
-  if (!/^https?:\/\/[^/\s]+$/.test(url)) { $('#add-hub-msg').replaceChildren(el('div', { class: 'notice bad' }, 'Enter an address like 192.168.7.246:8080.')); return }
-  // Example mode: the hub is added locally; with the real API the page first calls GET /api/wallet with the owner key.
-  state.hubs.push({ url, name: url.replace(/^https?:\/\//, ''), earned: 0, sats: 0, freeUtxos: 0, toSign: [], devices: [] })
-  hubIndex = state.hubs.length - 1; show(null); render()
+  const url = normUrl($('#hub-url').value); const key = $('#hub-key').value.trim()
+  if (!url || !key) { $('#add-hub-msg').replaceChildren(el('div', { class: 'notice bad' }, 'Enter the hub address (e.g. 192.168.7.246:8080) and its owner key.')); return }
+  try {
+    await call(url + '/api/wallet', { key }) // checks both the address and the owner key
+    if (!hubCfg.some((x) => x.url === url)) hubCfg.push({ url, key })
+    save_('hostHubs', hubCfg); hubIndex = hubCfg.findIndex((x) => x.url === url); save_('hostHubIndex', hubIndex)
+    $('#hub-key').value = ''; show(null); await refresh()
+  } catch (err) { $('#add-hub-msg').replaceChildren(el('div', { class: 'notice bad' }, `Could not open the hub: ${err.message}`)) }
+})
+function removeHub (i) { hubCfg.splice(i, 1); save_('hostHubs', hubCfg); hubIndex = 0; save_('hostHubIndex', 0); refresh() }
+$('#add-wallet-form').addEventListener('submit', async (e) => {
+  e.preventDefault()
+  const url = normUrl($('#wallet-url').value)
+  if (!url) { $('#add-wallet-msg').replaceChildren(el('div', { class: 'notice bad' }, 'Enter an address like http://127.0.0.1:8091.')); return }
+  try {
+    await call(url + '/api/me')
+    if (!walletCfg.some((x) => x.url === url)) walletCfg.push({ url, label: walletCfg.length ? `Wallet ${walletCfg.length + 1}` : 'My wallet' })
+    save_('hostWallets', walletCfg); show(null); await refresh()
+  } catch (err) { $('#add-wallet-msg').replaceChildren(el('div', { class: 'notice bad' }, `No wallet answers at ${url}: ${err.message}`)) }
 })
 
 // ---------- sheets ----------
@@ -266,4 +265,5 @@ function show (id) { document.querySelectorAll('.sheet').forEach((s) => { s.hidd
 document.addEventListener('click', (e) => { if (e.target.closest('[data-close]')) show(null) })
 $('#wallets').addEventListener('scroll', () => { const c = $('#wallets'); const i = Math.round(c.scrollLeft / c.clientWidth); if (i !== walletIndex) { walletIndex = i; render() } }, { passive: true })
 
-render()
+refresh()
+setInterval(() => { if ($('#home').hidden === false) refresh() }, 10000)

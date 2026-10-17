@@ -4,7 +4,7 @@
      Hubs: added by address + owner key, kept on this device; earnings, sweep, "To sign".
      Devices: one JSON configuration per device on the hub; changes are described in plain language,
      the hub's AI proposes a new JSON, the page shows the differences, the host applies them.
-     For now it runs on example data (marked), following docs/HOST-APP.md. -->
+     Real APIs: API_usage.md and src/devices.js; example data (marked) only while no hub is connected. -->
 <html lang="en">
 <head>
 <meta charset="utf-8">
@@ -41,6 +41,20 @@
     <button class="btn block" id="add-device" type="button">+ Add device</button>
   </section>
 </main>
+
+<!-- Connect the host's personal wallet -->
+<section class="sheet" id="add-wallet" hidden aria-labelledby="add-wallet-title">
+  <div class="app">
+    <div class="row"><button class="icon-btn" data-close type="button" aria-label="Back">‹</button><h2 class="grow" id="add-wallet-title">Connect your wallet</h2></div>
+    <form class="card" id="add-wallet-form">
+      <span class="label">HubWallet wallet (Tether WDK)</span>
+      <p class="small">Your personal wallet receives your hubs' earnings and is where you keep them. Enter the address of your wallet service (src/guest.js with WALLET=provider).</p>
+      <input id="wallet-url" class="input" value="http://127.0.0.1:8091" aria-label="Wallet service address" autocomplete="off">
+      <button class="btn primary" type="submit">Connect</button>
+      <div id="add-wallet-msg"></div>
+    </form>
+  </div>
+</section>
 
 <!-- Add a hub -->
 <section class="sheet" id="add-hub" hidden aria-labelledby="add-hub-title">
