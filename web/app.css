@@ -279,3 +279,26 @@ details.json-box summary { cursor: pointer; color: var(--blue); font-size: 15px;
 .screen-pay { display: flex; gap: 20px; align-items: center; background: var(--surface); border-radius: var(--r-l); padding: 18px; box-shadow: var(--shadow); text-align: left }
 .screen-pay #qr { background: #fff; padding: 10px; border-radius: var(--r-m); flex: none; line-height: 0 }
 .picker { display: grid; gap: 14px; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)) }
+
+/* ---------- host: phone layout (below 980 px; the desktop layout above is unchanged) ----------
+   Order on a phone: hub switcher (pills) → hub overview, signatures, machines, AI tools → personal wallet. */
+@media (max-width: 979px) {
+  .host-grid { display: flex; flex-direction: column; gap: 22px }
+  .host-side { display: contents }                       /* its sections join the main column and can be ordered */
+  .host-side > .section:nth-child(2) { order: -2 }       /* hubs first */
+  .host-main { order: -1 }
+  .host-side > .section:first-child { order: 1 }         /* personal wallet last */
+  .host-side > .section:nth-child(2) .section-head { display: none }
+  #hub-list { display: flex; gap: 8px; overflow-x: auto; background: transparent; box-shadow: none; border-radius: 0;
+    scrollbar-width: none; margin: 0 -20px; padding: 4px 20px }
+  #hub-list::-webkit-scrollbar { display: none }
+  #hub-list .cell { flex: none; width: auto; min-height: 40px; padding: 8px 14px; gap: 8px; border-radius: 999px; background: var(--surface); box-shadow: var(--shadow) }
+  #hub-list .cell::before { display: none }
+  #hub-list .cell .sub { display: none }
+  #hub-list .cell .cell-icon { width: 22px; height: 22px; border-radius: 6px }
+  #hub-list .cell[aria-pressed="true"] { background: var(--ink); color: var(--bg) }
+  #hub-list .cell[aria-pressed="true"] > span[style] { display: none }   /* the check mark: the dark pill already says "selected" */
+  .devices { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px }
+  .device-card { min-height: 160px; padding: 14px }
+  .device-card.add { display: none }                     /* same action as "Add a machine" in the AI tools below */
+}
