@@ -35,8 +35,8 @@ const DAYS = ['sun', 'mon', 'tue', 'wed', 'thu', 'fri', 'sat'] // index = Date.g
 const ID_RE = /^[a-z0-9][a-z0-9-]{0,29}$/
 
 const DEMO = [ // the demo laundry (docs/PLAN.md "Demo scope")
-  { id: 'washer', name: 'Washing machine', icon: '🧺', type: 'use', price: 300, unit: 'wash', commands: ['start', 'stop', 'lock', 'unlock'], rules: [{ when: { kind: 'counter_at', value: 50 }, do: { kind: 'propose_purchase', reason: 'maintenance' } }], version: 1 },
-  { id: 'dryer', name: 'Dryer', icon: '🌀', type: 'use', price: 200, unit: 'cycle', commands: ['start', 'stop', 'lock', 'unlock'], rules: [], version: 1 }
+  { id: 'washer', name: 'Washing machine', icon: 'washer', type: 'use', price: 300, unit: 'wash', commands: ['start', 'stop', 'lock', 'unlock'], rules: [{ when: { kind: 'counter_at', value: 50 }, do: { kind: 'propose_purchase', reason: 'maintenance' } }], version: 1 },
+  { id: 'dryer', name: 'Dryer', icon: 'dryer', type: 'use', price: 200, unit: 'cycle', commands: ['start', 'stop', 'lock', 'unlock'], rules: [], version: 1 }
 ]
 
 // ---------- validation by code: the AI's proposal (or a page's request) is never saved as is ----------
@@ -71,7 +71,7 @@ export function validateDevice (cfg, { current } = {}) {
     rules.push({ when: { kind: w.kind, value }, do: act })
   }
   if (errors.length) throw new Error(errors.join(' '))
-  const clean = { id, name, icon: String(cfg.icon || '🧩').slice(0, 8), type: cfg.type, price: cfg.price, unit: String(cfg.unit || 'use').slice(0, 12), commands, rules, version: Number.isInteger(cfg.version) && cfg.version > 0 ? cfg.version : 1 }
+  const clean = { id, name, icon: String(cfg.icon || 'device').slice(0, 20), type: cfg.type, price: cfg.price, unit: String(cfg.unit || 'use').slice(0, 12), commands, rules, version: Number.isInteger(cfg.version) && cfg.version > 0 ? cfg.version : 1 }
   if (cfg.type === 'rent' && Number.isInteger(cfg.maxHours) && cfg.maxHours > 0) clean.maxHours = Math.min(cfg.maxHours, 24)
   return clean
 }

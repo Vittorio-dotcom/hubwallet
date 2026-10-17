@@ -1,68 +1,92 @@
 <!doctype html>
 <!-- HubWallet guest app (the guest's phone).
-     Wallets: one or more WDK wallet services (src/guest.js), each at its own address, chosen by swiping the wallet card.
-     Hubs: found with the search bar (name of a hub already connected, or the address of a new one) or offered by a QR link.
+     Wallets: one or more WDK wallet services (src/guest.js), each at its own address, chosen by swiping the wallet pass.
+     Hubs: found with the search field (name of a hub already connected, or the address of a new one) or offered by a QR link.
      The page never holds keys: signing happens inside the wallet service.
      Without any hub answering it shows example devices, marked "Example data". -->
 <html lang="en">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#f5f5f7" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#000000" media="(prefers-color-scheme: dark)">
 <title>HubWallet</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap">
 <link rel="stylesheet" href="app.css">
 </head>
 <body>
-<main class="app" id="home">
-  <header class="row">
-    <div class="grow">
-      <span class="label">HubWallet</span>
-      <h1>Hi, guest</h1>
-    </div>
-    <span class="demo-tag" id="demo-tag" hidden>Example data</span>
-    <button class="icon-btn" id="open-user" type="button" aria-label="Your profile">👤</button>
+<main class="page" id="home">
+  <header class="topbar">
+    <div class="brand grow"><span class="brand-mark" id="brand-mark"></span>HubWallet</div>
+    <span class="example-tag" id="demo-tag" hidden>Example data</span>
+    <button class="icon-btn" id="open-user" type="button" aria-label="Your profile"></button>
   </header>
+
+  <div class="title-block">
+    <h1 id="greeting">Laundry</h1>
+    <p id="greeting-sub">Pick a machine, pay from your wallet, it starts in about a minute.</p>
+  </div>
 
   <div id="offer" class="stack"></div>
 
-  <!-- Wallet cards: swipe to change wallet; the last card adds a wallet -->
-  <section aria-label="Your wallets" class="stack">
-    <div class="carousel" id="wallets" tabindex="0" aria-roledescription="carousel"></div>
+  <!-- Wallet passes: swipe to change wallet; the last one adds a wallet -->
+  <section aria-label="Your wallets" class="section">
+    <div class="passes" id="wallets" tabindex="0" aria-roledescription="carousel"></div>
     <div class="dots" id="dots" aria-hidden="true"></div>
   </section>
 
-  <!-- Hub search: connect to services and devices, also from a distance -->
-  <section class="card" aria-labelledby="search-title">
-    <h2 id="search-title">Find a hub</h2>
-    <form id="search-form" class="row">
-      <input id="search" class="input grow" placeholder="Hub name or address (e.g. 192.168.7.246:8080)" aria-label="Hub name or address" autocomplete="off">
-      <button class="btn primary" type="submit">Search</button>
+  <section class="section" aria-labelledby="near-title">
+    <div class="section-head"><h2 id="near-title">Machines</h2><button class="btn plain small" id="reload" type="button">Refresh</button></div>
+    <div id="devices"></div>
+  </section>
+
+  <section class="section" aria-labelledby="search-title">
+    <div class="section-head"><h2 id="search-title">Connect a hub</h2></div>
+    <form id="search-form" class="form-row">
+      <label class="search grow"><span class="sr-only">Hub name or address</span><span id="search-ico"></span>
+        <input id="search" class="field" placeholder="Name or address, e.g. 192.168.7.246:8080" autocomplete="off"></label>
+      <button class="btn primary" type="submit">Find</button>
     </form>
     <div id="search-out" class="stack"></div>
   </section>
-
-  <section aria-labelledby="near-title" class="stack">
-    <div class="row"><h2 class="grow" id="near-title">Devices</h2><button class="btn" id="reload" type="button">Refresh</button></div>
-    <div class="grid" id="devices"></div>
-  </section>
 </main>
 
-<!-- Wallet details: three separate views -->
-<section class="sheet" id="wallet" hidden aria-labelledby="wallet-title">
-  <div class="app">
-    <div class="row"><button class="icon-btn" data-close type="button" aria-label="Back">‹</button><h2 class="grow" id="wallet-title">Wallet</h2></div>
-    <div class="tabs" role="tablist" aria-label="Wallet sections">
-      <button role="tab" id="t-moves" aria-controls="tab-moves" aria-selected="true" data-tab="moves" type="button">Movements</button>
-      <button role="tab" id="t-address" aria-controls="tab-address" aria-selected="false" data-tab="address" type="button">Address</button>
+<!-- Device: details and payment -->
+<section class="sheet" id="device" hidden role="dialog" aria-modal="true" aria-labelledby="dev-title">
+  <div class="sheet-panel" tabindex="-1">
+    <div class="grabber"></div>
+    <div class="sheet-head"><h2 id="dev-title">Machine</h2><button class="icon-btn" data-close type="button" aria-label="Close"></button></div>
+    <div id="dev-body" class="stack" style="gap:20px"></div>
+    <div id="track" class="stack" hidden aria-live="polite">
+      <div id="track-msg" class="stack"></div>
+      <ol class="steps" id="track-steps"></ol>
+      <span id="track-link"></span>
+    </div>
+  </div>
+</section>
+
+<!-- Wallet details -->
+<section class="sheet" id="wallet" hidden role="dialog" aria-modal="true" aria-labelledby="wallet-title">
+  <div class="sheet-panel" tabindex="-1">
+    <div class="grabber"></div>
+    <div class="sheet-head"><h2 id="wallet-title">Wallet</h2><button class="icon-btn" data-close type="button" aria-label="Close"></button></div>
+    <div class="seg" role="tablist" aria-label="Wallet sections">
+      <button role="tab" id="t-moves" aria-controls="tab-moves" aria-selected="true" data-tab="moves" type="button">Activity</button>
+      <button role="tab" id="t-address" aria-controls="tab-address" aria-selected="false" data-tab="address" type="button">Receive</button>
       <button role="tab" id="t-keys" aria-controls="tab-keys" aria-selected="false" data-tab="keys" type="button">Keys</button>
     </div>
-    <div id="tab-moves" role="tabpanel" aria-labelledby="t-moves" class="card"><div class="list" id="moves"></div></div>
-    <div id="tab-address" role="tabpanel" aria-labelledby="t-address" class="card" hidden>
-      <span class="label">Bitcoin address (for fees)</span>
-      <span class="mono" id="address">–</span>
+    <div id="tab-moves" role="tabpanel" aria-labelledby="t-moves"><div class="group" id="moves"></div></div>
+    <div id="tab-address" role="tabpanel" aria-labelledby="t-address" class="stack" hidden>
+      <div class="group">
+        <div class="cell"><div class="grow"><div class="sub">Bitcoin address, for network fees</div><div class="mono" id="address">–</div></div></div>
+      </div>
       <button class="btn" id="copy-address" type="button">Copy address</button>
-      <span class="label">Receive dollars or a key</span>
-      <p class="small muted">Create an invoice and give it to whoever pays you.</p>
-      <button class="btn primary" id="make-invoice" type="button">Create an invoice</button>
+      <div class="group">
+        <div class="cell"><div class="grow"><div class="title">Receive dollars or a key</div><div class="sub">Create an invoice and give it to whoever pays you.</div></div></div>
+      </div>
+      <button class="btn primary" id="make-invoice" type="button">Create invoice</button>
       <span class="mono" id="invoice"></span>
     </div>
     <div id="tab-keys" role="tabpanel" aria-labelledby="t-keys" class="stack" hidden></div>
@@ -70,53 +94,36 @@
 </section>
 
 <!-- Connect a wallet -->
-<section class="sheet" id="connect" hidden aria-labelledby="connect-title">
-  <div class="app">
-    <div class="row"><button class="icon-btn" data-close type="button" aria-label="Back">‹</button><h2 class="grow" id="connect-title">Connect a wallet</h2></div>
-    <div class="card">
-      <span class="label">HubWallet wallet (Tether WDK)</span>
-      <p class="small">A self-custodial RGB wallet built on WDK. Your keys stay on your device. Enter the address of your wallet service.</p>
-      <form id="connect-form" class="row">
-        <input id="wallet-url" class="input grow" value="http://127.0.0.1:8090" aria-label="Wallet service address" autocomplete="off">
+<section class="sheet" id="connect" hidden role="dialog" aria-modal="true" aria-labelledby="connect-title">
+  <div class="sheet-panel" tabindex="-1">
+    <div class="grabber"></div>
+    <div class="sheet-head"><h2 id="connect-title">Add a wallet</h2><button class="icon-btn" data-close type="button" aria-label="Close"></button></div>
+    <div class="stack">
+      <h3>HubWallet</h3>
+      <p class="muted">A self-custodial wallet built on Tether WDK. Your keys stay on your device. Enter the address of your wallet service.</p>
+      <form id="connect-form" class="form-row">
+        <input id="wallet-url" class="field grow" value="http://127.0.0.1:8090" aria-label="Wallet service address" autocomplete="off">
         <button class="btn primary" type="submit">Connect</button>
       </form>
       <div id="connect-msg"></div>
     </div>
-    <div class="card">
-      <span class="label">Other RGB wallets</span>
-      <div class="list" id="providers"></div>
-      <p class="small muted">The demo runs on Mutinynet with assets on the RGB "signet" network used by WDK. Wallets on other RGB networks cannot hold them yet.</p>
+    <div class="stack">
+      <h3>Other RGB wallets</h3>
+      <div class="group" id="providers"></div>
+      <p class="footnote">The demo runs on Mutinynet with assets on the RGB network used by WDK. Wallets on other RGB networks cannot hold them yet.</p>
     </div>
-    <div class="card">
-      <span class="label">Just looking?</span>
-      <button class="btn" id="example-wallet" type="button">Try with an example wallet</button>
-    </div>
+    <button class="btn" id="example-wallet" type="button">Try with an example wallet</button>
   </div>
 </section>
 
-<!-- User section -->
-<section class="sheet" id="user" hidden aria-labelledby="user-title">
-  <div class="app">
-    <div class="row"><button class="icon-btn" data-close type="button" aria-label="Back">‹</button><h2 class="grow" id="user-title">Your profile</h2></div>
-    <div class="card"><span class="label">Wallets</span><div class="list" id="wallet-list"></div></div>
-    <div class="card"><span class="label">Hubs you are connected to</span><div class="list" id="hub-list"></div></div>
-    <div class="card">
-      <span class="label">Privacy</span>
-      <p class="small">Your keys and dollars stay in your wallet. A hub only sends you an invoice and checks that the payment arrived. It never learns your name or sees your balance.</p>
-    </div>
-  </div>
-</section>
-
-<!-- Device: details and payment -->
-<section class="sheet" id="device" hidden aria-labelledby="dev-title">
-  <div class="app">
-    <div class="row"><button class="icon-btn" data-close type="button" aria-label="Back">‹</button><h2 class="grow" id="dev-title">Device</h2></div>
-    <div class="card" id="dev-body"></div>
-    <div class="card" id="track" hidden aria-live="polite">
-      <ol class="steps" id="track-steps"></ol>
-      <div id="track-msg"></div>
-      <span id="track-link"></span>
-    </div>
+<!-- Profile -->
+<section class="sheet" id="user" hidden role="dialog" aria-modal="true" aria-labelledby="user-title">
+  <div class="sheet-panel" tabindex="-1">
+    <div class="grabber"></div>
+    <div class="sheet-head"><h2 id="user-title">Profile</h2><button class="icon-btn" data-close type="button" aria-label="Close"></button></div>
+    <div class="stack"><h3>Wallets</h3><div class="group" id="wallet-list"></div></div>
+    <div class="stack"><h3>Connected hubs</h3><div class="group" id="hub-list"></div></div>
+    <div class="notice info"><span id="privacy-ico"></span><div>Your keys and dollars stay in your wallet. A hub only sends you an invoice and checks that the payment arrived. It never learns your name or sees your balance.</div></div>
   </div>
 </section>
 

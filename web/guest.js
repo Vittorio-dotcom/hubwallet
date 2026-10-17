@@ -1,32 +1,18 @@
 // HubWallet guest app logic.
-// - Wallets: a list of WDK wallet services (src/guest.js: /api/me, /api/receive, /api/pay, /api/refresh, /api/transfers),
-//   kept on this device. Swiping the wallet card changes the active wallet; payments use the active one.
-// - Hubs: public API (/api/services, /api/services/:id/order, /api/orders/:id). A hub is added only after the guest
-//   confirms it (search bar or QR link), and can be used from a distance.
+// - Wallets: a list of WDK wallet services (src/guest.js: /api/me, /api/receive, /api/check, /api/pay-request, /api/refresh,
+//   /api/transfers, /api/proof), kept on this device. Swiping the wallet pass changes the active wallet; payments use it.
+// - Hubs: public API (/api/services, /api/services/:id/order, /api/payments/:id). A hub is added only after the guest
+//   confirms it (search field or QR link), and can be used from a distance.
 // - If no hub answers, example devices are shown, marked "Example data".
+import { el, fill, money, DOLLAR, icon, porthole, statusOf, clock } from './ui.js'
 
 const $ = (s) => document.querySelector(s)
-const money = (cents) => (Number(cents || 0) / 100).toFixed(2)
-const DOLLAR = 'HUSD'
 const EXAMPLE_WALLET = 'example:wallet'
 
 // ---------- storage (per device, best effort) ----------
 const load_ = (k, d) => { try { return JSON.parse(localStorage.getItem(k)) ?? d } catch { return d } }
 const save_ = (k, v) => { try { localStorage.setItem(k, JSON.stringify(v)) } catch {} }
 
-// ---------- DOM helper: elements with text only (no HTML injection) ----------
-// Fills a node, skipping null/false parts (native replaceChildren would print them as the text "null").
-const fill = (node, ...parts) => node.replaceChildren(...parts.flat().filter((x) => x !== null && x !== undefined && x !== false))
-function el (tag, props = {}, ...children) {
-  const n = document.createElement(tag)
-  for (const [k, v] of Object.entries(props)) {
-    if (k === 'class') n.className = v
-    else if (k === 'on') for (const [ev, fn] of Object.entries(v)) n.addEventListener(ev, fn)
-    else if (v !== undefined && v !== null && v !== false) n.setAttribute(k, v === true ? '' : v)
-  }
-  for (const c of children.flat()) if (c !== null && c !== undefined && c !== false) n.append(c instanceof Node ? c : String(c))
-  return n
-}
 async function api (url, body) {
   const r = await fetch(url, body ? { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) } : {})
   const j = await r.json().catch(() => ({}))
@@ -45,14 +31,14 @@ const EXAMPLE = {
     assets: { nia: [{ assetId: 'rgb:example-husd', ticker: DOLLAR, name: 'HubWallet test dollar', balance: { spendable: 10000 } }] } },
   transfers: [{ kind: 'ReceiveBlind', status: 'Settled', assignments: [{ Fungible: 10000 }], createdAt: Date.now() / 1000 - 3600 }],
   hubs: [{ url: 'example', name: 'Lavanderia', services: [
-    { id: 'washer', name: 'Washing machine', icon: '🧺', type: 'use', price: 200, device: { state: 'idle' } },
-    { id: 'dryer', name: 'Dryer', icon: '🌀', type: 'use', price: 150, device: { state: 'idle' } }
+    { id: 'washer', name: 'Washing machine', icon: 'washer', type: 'use', price: 300, unit: 'wash', state: { status: 'idle' } },
+    { id: 'dryer', name: 'Dryer', icon: 'dryer', type: 'use', price: 200, unit: 'cycle', state: { status: 'running', until: Date.now() + 42000 } }
   ] }]
 }
 const PROVIDERS = [
   { name: 'Iris Wallet', note: 'Android, by the RGB-Tools team', url: 'https://iriswallet.com' },
-  { name: 'BitMask', note: 'browser extension and web', url: 'https://bitmask.app' },
-  { name: 'KaleidoSwap', note: 'desktop, mobile (Rate) and browser extension', url: 'https://kaleidoswap.com' }
+  { name: 'BitMask', note: 'Browser extension and web', url: 'https://bitmask.app' },
+  { name: 'KaleidoSwap', note: 'Desktop, mobile and browser extension', url: 'https://kaleidoswap.com' }
 ]
 
 // ---------- state ----------
@@ -88,105 +74,116 @@ async function refresh () {
   render()
 }
 
-// ---------- rendering ----------
+// ---------- words ----------
 const KIND = { access: 'Access', use: 'Pay per use', rent: 'Rental' }
-// Device state from the hub's device layer (state: { status, until }); older hubs used device: { state, until }.
-const statusOf = (s) => s.state?.status || s.device?.state || 'idle'
-const untilOf = (s) => s.state?.until || s.device?.until || 0
-const leftText = (until) => { const ms = Math.max(0, until - Date.now()); const m = Math.floor(ms / 60000); return `${m}:${String(Math.floor((ms % 60000) / 1000)).padStart(2, '0')} left` }
-const busyNow = (s) => ['running', 'rented', 'locked', 'open'].includes(statusOf(s)) && !(s.type === 'access' && statusOf(s) === 'open')
-function stateOf (s) {
-  const st = statusOf(s); const until = untilOf(s)
-  if (s.type === 'access') return st === 'open' ? ['Open', 'on'] : ['Locked', 'free']
-  if (st === 'running' || st === 'rented') return [`In use${until ? ' · ' + leftText(until) : ''}`, 'busy']
-  if (st === 'locked') return ['Locked now', 'busy']
-  return ['Free', 'free']
+const per = (s) => s.type === 'rent' ? 'hour' : (s.unit || 'use')
+const priceText = (s) => s.type === 'access' ? 'Opens with your key' : `${money(s.price)} ${DOLLAR} per ${per(s)}`
+const stateText = (s) => {
+  const st = statusOf(s)
+  if (s.type === 'access') return st.key === 'busy' ? 'Open' : 'Locked'
+  if (st.key === 'busy') return st.until ? `In use · ${clock(st.until)}` : 'In use'
+  if (st.key === 'locked') return 'Locked now'
+  return 'Available'
 }
-const priceText = (s) => s.type === 'access' ? 'With your key' : `${money(s.price)} ${DOLLAR} ${s.type === 'rent' ? '/ hour' : '/ use'}`
+const badge = (s) => el('span', { class: `badge ${statusOf(s).key}` }, stateText(s))
+const canOrder = (s) => s.type !== 'access' && statusOf(s).key === 'free'
 
-function walletCard (w, i) {
+// ---------- rendering ----------
+function walletPass (w, i) {
   const d = walletData[w.url]
   if (!d?.ok) {
-    return el('div', { class: 'wcard off', role: 'group', 'aria-label': `Wallet ${i + 1}` },
-      el('span', { class: 'label' }, w.label || 'Wallet'),
-      el('strong', {}, 'Not reachable'),
-      el('span', { class: 'small' }, w.url),
-      el('div', { class: 'row' }, el('button', { class: 'btn', type: 'button', on: { click: refresh } }, 'Retry'),
-        el('button', { class: 'btn', type: 'button', on: { click: () => removeWallet(i) } }, 'Remove')))
+    return el('div', { class: 'pass off', role: 'group', 'aria-label': `${w.label || 'Wallet'}, not reachable` },
+      el('div', { class: 'pass-top' }, icon('alert', { size: 18 }), w.label || 'Wallet'),
+      el('div', { class: 'stack', style: 'gap:4px' }, el('strong', {}, 'Not reachable'), el('span', { class: 'footnote mono' }, w.url)),
+      el('div', { class: 'row' }, el('button', { class: 'btn small', type: 'button', on: { click: refresh } }, 'Try again'),
+        el('button', { class: 'btn small danger', type: 'button', on: { click: () => removeWallet(i) } }, 'Remove')))
   }
-  return el('button', { class: 'wcard', type: 'button', 'aria-label': `${w.label}: open movements, address and keys`, on: { click: () => { if (i === active) show('wallet') } } },
-    el('span', { class: 'label' }, w.label || 'Wallet'),
-    el('span', {}, el('span', { class: 'amount' }, money(dollar(d)?.balance.spendable || 0)), ' ', el('span', { class: 'unit' }, DOLLAR)),
-    el('span', { class: 'hint' }, `${(d.me.btc?.vanilla?.spendable ?? 0).toLocaleString('en')} sats for fees · details ›`))
+  return el('button', { class: 'pass', type: 'button', 'aria-label': `${w.label}, ${money(dollar(d)?.balance.spendable || 0)} ${DOLLAR}. Open activity`, on: { click: () => { if (i === active) show('wallet') } } },
+    el('div', { class: 'pass-top' }, icon('wallet', { size: 18 }), el('span', { class: 'grow' }, w.label || 'Wallet'), w.url === EXAMPLE_WALLET ? 'Example' : 'WDK'),
+    el('div', { class: 'amount' }, money(dollar(d)?.balance.spendable || 0), el('small', {}, DOLLAR)),
+    el('div', { class: 'pass-foot' }, el('span', {}, `${(d.me.btc?.vanilla?.spendable ?? 0).toLocaleString('en')} sats for network fees`), el('span', {}, 'Activity')))
 }
 
 function render () {
   $('#demo-tag').hidden = !demoHubs && current()?.url !== EXAMPLE_WALLET
+  const names = [...new Set(hubs.map((h) => h.name))]
+  $('#greeting').textContent = names.length === 1 ? names[0] : 'Nearby'
 
   // offered hubs (from a QR link): connect only after confirmation
-  fill($('#offer'), ...offered.map((url) => el('div', { class: 'card' },
-    el('span', { class: 'label' }, 'Hub from a link'), el('span', { class: 'mono' }, url),
-    el('p', { class: 'small muted' }, 'Connect only if you trust this hub (for example you scanned its QR code).'),
-    el('div', { class: 'row' },
-      el('button', { class: 'btn primary', type: 'button', on: { click: () => addHub(url) } }, 'Connect'),
-      el('button', { class: 'btn', type: 'button', on: { click: () => { offered = offered.filter((x) => x !== url); render() } } }, 'Ignore')))))
+  $('#offer').hidden = !offered.length
+  fill($('#offer'), offered.map((url) => el('div', { class: 'confirm' },
+    el('div', { class: 'row' }, el('span', { class: 'cell-icon' }, icon('hub', { size: 16 })), el('div', { class: 'grow' }, el('h3', {}, 'Connect this hub?'), el('div', { class: 'footnote mono' }, url))),
+    el('p', { class: 'footnote' }, 'You scanned its code. Connect only if you are at this place and trust it.'),
+    el('div', { class: 'form-row' },
+      el('button', { class: 'btn primary grow', type: 'button', on: { click: () => addHub(url) } }, 'Connect'),
+      el('button', { class: 'btn grow', type: 'button', on: { click: () => { offered = offered.filter((x) => x !== url); render() } } }, 'Not now')))))
 
-  // wallet carousel
-  const cards = wallets.map(walletCard)
-  cards.push(el('button', { class: 'wcard add', type: 'button', on: { click: () => show('connect') } },
-    el('span', { class: 'label' }, wallets.length ? 'Add a wallet' : 'No wallet yet'),
-    el('strong', { style: 'font-size:22px' }, wallets.length ? '+ Add wallet' : 'Connect a wallet'),
-    el('span', { class: 'hint' }, 'HubWallet (WDK) or another RGB wallet ›')))
+  // wallet passes
+  const cards = wallets.map(walletPass)
+  cards.push(el('button', { class: 'pass add', type: 'button', on: { click: () => show('connect') } },
+    el('span', { class: 'plus' }, icon('plus', { size: 24 })),
+    el('h3', {}, wallets.length ? 'Add another wallet' : 'Add your wallet'),
+    el('span', { class: 'footnote' }, 'HubWallet or another RGB wallet')))
   const car = $('#wallets'); const keep = car.scrollLeft
-  fill(car, ...cards)
+  fill(car, cards)
   car.scrollLeft = keep
-  fill($('#dots'), ...cards.map((_, i) => el('span', { class: i === active ? 'on' : '' })))
+  fill($('#dots'), cards.map((_, i) => el('span', { class: i === active ? 'on' : '' })))
 
-  // devices of the connected hubs, filtered by the search text
+  // machines of the connected hubs, filtered by the search text
   const q = query.toLowerCase()
-  const tiles = hubs.flatMap((h) => h.services.filter((s) => KIND[s.type]).map((s) => ({ h, s })))
+  const items = hubs.flatMap((h) => h.services.filter((s) => KIND[s.type]).map((s) => ({ h, s })))
     .filter(({ h, s }) => !q || h.name.toLowerCase().includes(q) || s.name.toLowerCase().includes(q))
-  fill($('#devices'), ...(tiles.length
-    ? tiles.map(({ h, s }) => {
-        const [label, cls] = stateOf(s)
-        return el('button', { class: 'tile', type: 'button', on: { click: () => openDevice(h, s) }, 'aria-label': `${s.name}, ${priceText(s)}` },
-          el('span', { class: 'ic', 'aria-hidden': 'true' }, s.icon || '🧩'), el('span', { class: 'name' }, s.name),
-          el('span', { class: 'price' }, priceText(s)), el('span', { class: `pill ${cls}` }, label), el('span', { class: 'where' }, h.name))
-      })
-    : [el('div', { class: 'empty', style: 'grid-column:1/-1' }, q ? 'No device matches your search.' : 'No hub connected. Search a hub above or scan its QR code.')]))
+  const many = names.length > 1
+  fill($('#devices'), items.length
+    ? el('div', { class: 'group arts' }, items.map(({ h, s }) => el('button', { class: 'cell', type: 'button', on: { click: () => openDevice(h, s) }, 'aria-label': `${s.name}, ${priceText(s)}, ${stateText(s)}` },
+        porthole(s, { size: 48 }),
+        el('div', { class: 'grow stack', style: 'gap:4px' }, el('div', { class: 'title' }, s.name), el('div', { class: 'sub' }, many ? `${priceText(s)} · ${h.name}` : priceText(s)), el('div', {}, badge(s))),
+        el('span', { class: 'chev' }, icon('chevronRight', { size: 18 })))))
+    : el('div', { class: 'group' }, el('div', { class: 'empty' }, icon('search', { size: 32 }),
+        el('h3', {}, q ? 'No machine matches' : 'No hub connected'),
+        el('p', { class: 'footnote' }, q ? 'Try another name.' : 'Scan the code on a machine, or connect a hub below.'))))
 
   // wallet sheet (active wallet)
   const d = data()
   $('#wallet-title').textContent = current()?.label || 'Wallet'
   $('#address').textContent = d?.me?.address || '–'
   const tr = d?.transfers || []
-  fill($('#moves'), ...(tr.length
+  fill($('#moves'), tr.length
     ? [...tr].sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0)).map((t) => {
         const amt = (t.assignments || []).reduce((s, a) => s + Number(a.Fungible || 0), 0) || Number(t.requestedAssignment?.Fungible || 0)
         const kind = typeof t.kind === 'number' ? ['Issuance', 'ReceiveBlind', 'ReceiveWitness', 'Send', 'Inflation'][t.kind] : t.kind
         const status = typeof t.status === 'number' ? ['WaitingCounterparty', 'WaitingConfirmations', 'Settled', 'Failed'][t.status] : t.status
         const incoming = String(kind).startsWith('Receive') || kind === 'Issuance'
         const when = t.createdAt ? new Date(t.createdAt * 1000).toLocaleString('en', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' }) : ''
-        return el('div', {}, el('span', { 'aria-hidden': 'true' }, incoming ? '↓' : '↑'),
-          el('div', { class: 'grow' }, el('div', {}, incoming ? 'Received' : 'Sent'), el('div', { class: 'small muted' }, `${when} · ${status}`)),
-          el('span', { class: 'mono' }, money(amt)),
-          t.txid ? el('a', { href: 'https://mutinynet.com/tx/' + t.txid, target: '_blank', rel: 'noopener', class: 'small' }, 'tx') : null)
+        const pending = status !== 'Settled'
+        return el('div', { class: 'cell' },
+          el('span', { class: `cell-icon ${incoming ? 'green' : 'gray'}` }, icon(incoming ? 'arrowDown' : 'arrowUp', { size: 16 })),
+          el('div', { class: 'grow' }, el('div', { class: 'title' }, incoming ? 'Received' : 'Paid'), el('div', { class: 'sub' }, pending ? `${when} · confirming` : when)),
+          el('span', { class: 'value num' }, `${incoming ? '+' : '−'}${money(amt)}`),
+          t.txid ? el('a', { href: 'https://mutinynet.com/tx/' + t.txid, target: '_blank', rel: 'noopener', 'aria-label': 'See on the explorer' }, icon('external', { size: 16 })) : null)
       })
-    : [el('div', { class: 'empty' }, 'No movements yet.')]))
-  fill($('#tab-keys'), ...(keys().length
-    ? keys().map((a) => el('div', { class: 'key' }, el('span', { class: 'label' }, 'Key · RGB asset'), el('strong', {}, a.name), el('span', { class: 'mono' }, a.ticker)))
-    : [el('div', { class: 'empty' }, 'No access keys in this wallet.')]))
+    : el('div', { class: 'empty' }, icon('clock', { size: 28 }), el('p', {}, 'No activity yet.')))
+  fill($('#tab-keys'), keys().length
+    ? el('div', { class: 'group' }, keys().map((a) => el('div', { class: 'cell' }, el('span', { class: 'cell-icon orange' }, icon('key', { size: 16 })),
+        el('div', { class: 'grow' }, el('div', { class: 'title' }, a.name), el('div', { class: 'sub mono' }, a.ticker)))))
+    : el('div', { class: 'group' }, el('div', { class: 'empty' }, icon('key', { size: 28 }), el('p', {}, 'No access keys in this wallet.'))))
 
-  // user + connect sheets
-  fill($('#wallet-list'), ...(wallets.length ? wallets.map((w, i) => el('div', {}, el('span', { class: 'grow' }, w.label), el('span', { class: 'small muted mono' }, w.url === EXAMPLE_WALLET ? 'example' : w.url),
-    el('button', { class: 'btn', type: 'button', on: { click: () => removeWallet(i) } }, 'Remove'))) : [el('div', { class: 'small muted' }, 'No wallet connected.')]))
-  fill($('#hub-list'), ...(hubUrls.length ? hubUrls.map((u) => el('div', {}, el('span', { class: 'grow mono small' }, u),
-    el('button', { class: 'btn', type: 'button', on: { click: () => { hubUrls = hubUrls.filter((x) => x !== u); save_('hubUrls', hubUrls); refresh() } } }, 'Remove'))) : [el('div', { class: 'small muted' }, 'No hub connected.')]))
-  fill($('#providers'), ...PROVIDERS.map((p) => el('div', {}, el('div', { class: 'grow' }, el('div', {}, p.name), el('div', { class: 'small muted' }, `${p.note} · not supported in the demo`)),
-    el('a', { href: p.url, target: '_blank', rel: 'noopener', class: 'small' }, 'Website'))))
+  // profile + connect sheets
+  fill($('#wallet-list'), wallets.length
+    ? wallets.map((w, i) => el('div', { class: 'cell' }, el('span', { class: 'cell-icon' }, icon('wallet', { size: 16 })),
+        el('div', { class: 'grow' }, el('div', { class: 'title' }, w.label), el('div', { class: 'sub mono' }, w.url === EXAMPLE_WALLET ? 'example' : w.url)),
+        el('button', { class: 'btn small danger', type: 'button', on: { click: () => removeWallet(i) } }, 'Remove')))
+    : el('div', { class: 'cell' }, el('span', { class: 'muted' }, 'No wallet yet.')))
+  fill($('#hub-list'), hubUrls.length
+    ? hubUrls.map((u) => el('div', { class: 'cell' }, el('span', { class: 'cell-icon gray' }, icon('hub', { size: 16 })), el('span', { class: 'grow mono' }, u),
+        el('button', { class: 'btn small danger', type: 'button', on: { click: () => { hubUrls = hubUrls.filter((x) => x !== u); save_('hubUrls', hubUrls); refresh() } } }, 'Remove')))
+    : el('div', { class: 'cell' }, el('span', { class: 'muted' }, 'No hub connected.')))
+  fill($('#providers'), PROVIDERS.map((p) => el('a', { class: 'cell', href: p.url, target: '_blank', rel: 'noopener' },
+    el('div', { class: 'grow' }, el('div', { class: 'title' }, p.name), el('div', { class: 'sub' }, `${p.note} · not in the demo`)),
+    el('span', { class: 'chev' }, icon('external', { size: 16 })))))
 }
 
-// ---------- carousel: the visible card is the active wallet ----------
+// ---------- carousel: the visible pass is the active wallet ----------
 $('#wallets').addEventListener('scroll', () => {
   const car = $('#wallets')
   const i = Math.round(car.scrollLeft / car.clientWidth)
@@ -195,10 +192,10 @@ $('#wallets').addEventListener('scroll', () => {
 
 // ---------- wallets ----------
 async function addWallet (url, label) {
-  if (wallets.some((w) => w.url === url)) { fill($('#connect-msg'), el('div', { class: 'notice bad' }, 'This wallet is already connected.')); return }
+  if (wallets.some((w) => w.url === url)) { fill($('#connect-msg'), notice('bad', 'This wallet is already connected.')); return }
   const w = { url, label: label || `Wallet ${wallets.length + 1}` }
   await loadWallet(w)
-  if (!walletData[url].ok) { fill($('#connect-msg'), el('div', { class: 'notice bad' }, `No wallet answers at ${url}.`)); return }
+  if (!walletData[url].ok) { fill($('#connect-msg'), notice('bad', `No wallet answers at ${url}. Check that the wallet service is running.`)); return }
   wallets.push(w); active = wallets.length - 1
   save_('wallets', wallets); save_('activeWallet', active)
   show(null); render()
@@ -211,7 +208,7 @@ function removeWallet (i) {
 $('#connect-form').addEventListener('submit', (e) => {
   e.preventDefault()
   const url = normUrl($('#wallet-url').value)
-  if (!url) { fill($('#connect-msg'), el('div', { class: 'notice bad' }, 'Enter an address like http://127.0.0.1:8090.')); return }
+  if (!url) { fill($('#connect-msg'), notice('bad', 'Enter an address like http://127.0.0.1:8090.')); return }
   addWallet(url, 'HubWallet')
 })
 $('#example-wallet').onclick = () => addWallet(EXAMPLE_WALLET, 'Example wallet')
@@ -220,30 +217,37 @@ $('#example-wallet').onclick = () => addWallet(EXAMPLE_WALLET, 'Example wallet')
 function addHub (url) {
   if (!hubUrls.includes(url)) hubUrls.push(url)
   offered = offered.filter((x) => x !== url)
-  save_('hubUrls', hubUrls); fill($('#search-out'), ); refresh()
+  save_('hubUrls', hubUrls); fill($('#search-out')); refresh()
 }
 $('#search-form').addEventListener('submit', async (e) => {
   e.preventDefault()
   const text = $('#search').value.trim()
   const url = /[.:]/.test(text) ? normUrl(text) : null
-  if (!url) { query = text; render(); return } // a name: filter the connected hubs and their devices
+  if (!url) { query = text; render(); return } // a name: filter the connected hubs and their machines
   query = ''
-  fill($('#search-out'), el('p', { class: 'small muted' }, `Looking for a hub at ${url}…`))
+  fill($('#search-out'), el('p', { class: 'footnote' }, `Looking for a hub at ${url}…`))
   try {
     const info = await api(url + '/api/hub/info') // public: { name, network, hubKey }
     const h = await api(url + '/api/services').catch(() => ({ services: [] }))
-    fill($('#search-out'), el('div', { class: 'card' },
-      el('span', { class: 'label' }, 'Hub found'), el('strong', {}, info.name || 'Unnamed hub'), el('span', { class: 'mono small' }, url),
-      el('span', { class: 'small muted' }, `${(h.services || []).length} devices · network ${info.network || '?'}`),
-      hubUrls.includes(url) ? el('span', { class: 'small' }, 'Already connected.')
-        : el('button', { class: 'btn primary', type: 'button', on: { click: () => addHub(url) } }, 'Connect to this hub')))
-  } catch { fill($('#search-out'), el('div', { class: 'notice bad' }, `No hub answers at ${url}.`)) }
+    fill($('#search-out'), el('div', { class: 'group' }, el('div', { class: 'cell' },
+      el('span', { class: 'cell-icon' }, icon('hub', { size: 16 })),
+      el('div', { class: 'grow' }, el('div', { class: 'title' }, info.name || 'Unnamed hub'), el('div', { class: 'sub' }, `${(h.services || []).length} machines · ${url.replace(/^https?:\/\//, '')}`)),
+      hubUrls.includes(url) ? el('span', { class: 'value' }, 'Connected')
+        : el('button', { class: 'btn small primary', type: 'button', on: { click: () => addHub(url) } }, 'Connect'))))
+  } catch { fill($('#search-out'), notice('bad', `No hub answers at ${url}.`)) }
 })
 $('#search').addEventListener('input', (e) => { if (!/[.:]/.test(e.target.value)) { query = e.target.value.trim(); render() } })
 
 // ---------- sheets and tabs ----------
-function show (id) { document.querySelectorAll('.sheet').forEach((s) => { s.hidden = s.id !== id }); $('#home').hidden = !!id }
-document.addEventListener('click', (e) => { if (e.target.closest('[data-close]')) show(null) })
+function show (id) {
+  document.querySelectorAll('.sheet').forEach((s) => { s.hidden = s.id !== id })
+  document.body.style.overflow = id ? 'hidden' : ''
+  if (id) document.querySelector(`#${id} .sheet-panel`)?.focus({ preventScroll: true })
+}
+document.addEventListener('click', (e) => {
+  if (e.target.closest('[data-close]') || e.target.classList?.contains('sheet')) { show(null); openDev = null }
+})
+document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && !busy) { show(null); openDev = null } })
 $('#open-user').onclick = () => show('user')
 $('#reload').onclick = async () => { if (current() && current().url !== EXAMPLE_WALLET) await walletApi('/api/refresh', {}).catch(() => {}); refresh() }
 document.querySelectorAll('[data-tab]').forEach((b) => b.addEventListener('click', () => {
@@ -254,36 +258,47 @@ $('#copy-address').onclick = async () => { try { await navigator.clipboard.write
 $('#make-invoice').onclick = async () => {
   try { const r = await walletApi('/api/receive', { amount: 1 }); $('#invoice').textContent = r.invoice } catch (e) { $('#invoice').textContent = e.message }
 }
+const notice = (kind, text, ...extra) => el('div', { class: `notice ${kind}` }, icon(kind === 'ok' ? 'checkCircle' : kind === 'bad' ? 'alert' : 'info', { size: 18 }), el('div', { class: 'stack', style: 'gap:8px' }, text, ...extra))
 
-// ---------- device: details → pay with the active wallet → follow ----------
+// ---------- a machine: details → pay with the active wallet → follow ----------
 let hours = 1
 let openDev = null
-function openDevice (h, s) { openDev = { h, s }; hours = 1; $('#dev-title').textContent = s.name; $('#track').hidden = true; renderDevice(h, s); show('device') }
+function openDevice (h, s) { openDev = { h, s }; hours = 1; $('#dev-title').textContent = s.name; $('#track').hidden = true; $('#dev-body').hidden = false; fill($('#track-msg')); renderDevice(h, s); show('device') }
 function renderDevice (h, s) {
-  const [label, cls] = stateOf(s)
+  const st = statusOf(s)
   const amount = s.type === 'rent' ? s.price * hours : s.price
   const w = current()
-  const canPay = !busy && !!w && !busyNow(s) && s.type !== 'access'
-  fill($('#dev-body'), 
-    el('div', { class: 'row' }, el('span', { style: 'font-size:40px', 'aria-hidden': 'true' }, s.icon || '🧩'),
-      el('div', { class: 'grow' }, el('strong', {}, s.name), el('div', { class: 'small muted' }, `${KIND[s.type]} · ${h.name}`)),
-      el('span', { class: `pill ${cls}` }, label)),
-    el('p', { class: 'muted small' }, priceText(s)),
-    s.type === 'rent' ? el('div', { class: 'hours', role: 'group', 'aria-label': 'Hours' },
-      ...Array.from({ length: s.maxHours || 4 }, (_, i) => el('button', { type: 'button', 'aria-pressed': String(hours === i + 1), on: { click: () => { hours = i + 1; renderDevice(h, s) } } }, `${i + 1} h`))) : null,
-    el('div', { class: 'total' }, el('span', {}, 'Total'), el('span', {}, `${money(amount)} ${DOLLAR}`)),
-    busyNow(s) ? el('div', { class: 'notice' }, statusOf(s) === 'locked' ? 'This device is locked right now by a rule of the owner (for example a quiet hour).' : `This device is in use. It will be free in ${leftText(untilOf(s)).replace(' left', '')}.`) : null,
-    el('p', { class: 'small muted' }, w ? `Paid from: ${w.label}` : 'Connect a wallet to pay.'),
-    el('p', { class: 'small muted mono' }, `Hub: ${demoHubs ? 'example' : h.url}`),
-    w ? el('button', { class: 'btn primary block', type: 'button', disabled: !canPay, on: { click: () => pay(h, s) } }, `Pay ${money(amount)} ${DOLLAR}`)
-      : el('button', { class: 'btn primary block', type: 'button', on: { click: () => show('connect') } }, 'Connect a wallet'))
+  const canPay = !busy && !!w && canOrder(s)
+  fill($('#dev-body'),
+    el('div', { class: 'device-hero' }, porthole(s, { size: 132 }),
+      el('div', { class: 'stack', style: 'align-items:center;gap:6px' }, badge(s), el('span', { class: 'footnote' }, `${KIND[s.type]} at ${h.name}`))),
+    s.type === 'access' ? null : el('div', { class: 'stack', style: 'align-items:center;gap:4px' },
+      el('div', { class: 'price-big' }, money(amount), el('small', {}, DOLLAR)),
+      el('span', { class: 'footnote' }, s.type === 'rent' ? `${money(s.price)} per hour` : `for one ${per(s)}`)),
+    s.type === 'rent' ? el('div', { class: 'seg', role: 'group', 'aria-label': 'Hours' },
+      Array.from({ length: s.maxHours || 4 }, (_, i) => el('button', { type: 'button', 'aria-pressed': String(hours === i + 1), on: { click: () => { hours = i + 1; renderDevice(h, s) } } }, `${i + 1} h`))) : null,
+    st.key === 'busy' ? notice('info', `In use right now. Free in ${clock(st.until)}.`) : null,
+    st.key === 'locked' ? notice('warn', 'Locked right now by the owner, for example during quiet hours.') : null,
+    s.type === 'access' ? notice('info', 'This opens with your key, nothing to pay.') : null,
+    w ? el('button', { class: 'btn pay block', type: 'button', disabled: !canPay, on: { click: () => pay(h, s) } }, icon('wallet', { size: 20 }), `Pay ${money(amount)} ${DOLLAR}`)
+      : el('button', { class: 'btn primary block', type: 'button', on: { click: () => show('connect') } }, 'Add a wallet to pay'),
+    w ? el('p', { class: 'footnote', style: 'text-align:center' }, `From ${w.label}. Your wallet checks the price before anything is sent.`) : null)
 }
-const STEPS = ['Invoice from the hub', 'Paid from your wallet', 'Waiting for Bitcoin confirmation', 'Done']
+
+const STEPS = ['Price requested from the machine', 'Payment sent from your wallet', 'Confirming on Bitcoin, about a minute', 'Machine started']
 function track (step, msg, cls, link) {
   $('#track').hidden = false
-  fill($('#track-steps'), ...STEPS.map((t, i) => el('li', { class: i < step ? 'done' : i === step ? 'on' : '' }, t)))
-  fill($('#track-msg'), msg ? el('div', { class: `notice ${cls || ''}` }, msg) : '')
-  fill($('#track-link'), link && /^https:\/\//.test(link) ? el('a', { href: link, target: '_blank', rel: 'noopener', class: 'small' }, 'See the transaction on the explorer') : '')
+  if (step >= 4 && cls === 'ok') { // success: one clear moment, the only thing on screen
+    $('#dev-body').hidden = true
+    fill($('#track-msg'), el('div', { class: 'success' }, el('span', { class: 'tick' }, icon('check', { size: 38 })), el('h2', {}, msg || 'Machine started'),
+      el('p', { class: 'footnote' }, 'Paid in dollars on Bitcoin. The receipt is signed by the hub and kept in your wallet.')))
+    fill($('#track-steps'))
+  } else {
+    fill($('#track-steps'), STEPS.map((t, i) => el('li', { class: i < step ? 'done' : i === step ? 'on' : '' },
+      el('span', { class: 'dot' }, i < step ? icon('check', { size: 14 }) : null), t)))
+    fill($('#track-msg'), msg ? notice(cls || 'info', msg) : null)
+  }
+  fill($('#track-link'), link && /^https:\/\//.test(link) ? el('a', { href: link, target: '_blank', rel: 'noopener', class: 'row', style: 'justify-content:center;gap:6px;min-height:44px' }, 'See the Bitcoin transaction', icon('external', { size: 16 })) : null)
 }
 // Payment flow of API_usage.md §4 (payer wallet = src/guest.js):
 //   1. the hub creates the payment request (service layer: POST /api/services/:id/order → id = payment id)
@@ -296,21 +311,21 @@ const FINAL_BAD = { underpaid: 'The hub received less than asked.', failed: 'The
 function friendly (msg) {
   const m = String(msg || '')
   if (/InsufficientAssignments/.test(m)) return { text: 'Your dollars are still settling from your last payment. Try again in about a minute.' }
-  if (/InsufficientAllocationSlots|AllocationsAlreadyAvailable/.test(m)) return { text: 'Your wallet needs to prepare new slots to hold dollars (a small Bitcoin transaction, about a minute).', prepare: true }
-  if (/InsufficientBitcoins/.test(m)) return { text: 'Your wallet has too little bitcoin to pay the network fee. Add some sats to your address (Wallet › Address).' }
+  if (/InsufficientAllocationSlots|AllocationsAlreadyAvailable/.test(m)) return { text: 'Your wallet needs to prepare room for dollars first (a small Bitcoin transaction, about a minute).', prepare: true }
+  if (/InsufficientBitcoins/.test(m)) return { text: 'Your wallet has too little bitcoin for the network fee. Add some sats to your address (Wallet, Receive).' }
   return { text: m }
 }
 async function prepareWallet () {
-  try { await walletApi('/api/utxos', { num: 8 }); track(0, 'Preparing your wallet: try paying again in about a minute.', 'ok') } catch (e) { track(0, friendly(e.message).text, 'bad') }
+  try { await walletApi('/api/utxos', { num: 8 }); track(0, 'Preparing your wallet. Try paying again in about a minute.', 'ok') } catch (e) { track(0, friendly(e.message).text, 'bad') }
 }
 async function pay (h, s) {
   busy = true; renderDevice(h, s)
   try {
     if (demoHubs || current().url === EXAMPLE_WALLET) { // example mode: show the steps, move nothing
       for (let i = 0; i <= 3; i++) { track(i, 'Example data: nothing is really paid.'); await new Promise((r) => setTimeout(r, 900)) }
-      track(4, `${s.name} started.`, 'ok'); return
+      track(4, `${s.name} started`, 'ok'); return
     }
-    track(0, 'Asking the hub for a payment request…')
+    track(0, 'Asking the machine for its price…')
     const order = await api(`${h.url}/api/services/${encodeURIComponent(s.id)}/order`, s.type === 'rent' ? { hours } : {})
     const paymentId = order.id
     // 2. what the wallet itself reads in the hub's invoice
@@ -323,16 +338,15 @@ async function pay (h, s) {
     track(1, `Paying ${money(c.amount)} ${DOLLAR}…`)
     // 4. pay exactly what was confirmed
     const paid = await walletApi('/api/pay-request', { hubUrl: h.url, paymentId, expect: { assetId: c.assetId, amount: c.amount } })
-    track(2, 'Sent. The hub checks it on Bitcoin: about a minute.', '', paid.link)
+    track(2, 'Sent. The machine starts as soon as Bitcoin confirms it.', 'info', paid.link)
     // 5. follow the hub's public payment record
     for (let i = 0; i < 60; i++) {
       await new Promise((r) => setTimeout(r, 5000))
       if (i % 2 === 0) walletApi('/api/refresh', {}).catch(() => {})
       const p = await api(`${h.url}/api/payments/${encodeURIComponent(paymentId)}`)
       if (p.status === 'paid') {
-        let receipt = ''
-        try { const pr = await walletApi(`/api/proof?hubUrl=${encodeURIComponent(h.url)}&paymentId=${encodeURIComponent(paymentId)}`); receipt = pr.valid ? ' Receipt signed by the hub and saved in your wallet.' : '' } catch {}
-        track(4, `${s.name} started.${receipt}`, 'ok', p.link || paid.link)
+        try { await walletApi(`/api/proof?hubUrl=${encodeURIComponent(h.url)}&paymentId=${encodeURIComponent(paymentId)}`) } catch {}
+        track(4, `${s.name} started`, 'ok', p.link || paid.link)
         break
       }
       if (FINAL_BAD[p.status]) { track(2, FINAL_BAD[p.status] + ' Nothing was started.', 'bad', p.link || paid.link); break }
@@ -346,7 +360,7 @@ async function pay (h, s) {
     await walletApi('/api/me?fresh=1').catch(() => {}) // the wallet caches balances for 30 s: force a fresh one after paying
     await refresh()
     const fresh = hubs.find((x) => x.url === h.url)?.services.find((x) => x.id === s.id)
-    if (fresh && !$('#device').hidden) renderDevice(h, fresh)
+    if (fresh && !$('#device').hidden) { openDev = { h, s: fresh }; renderDevice(h, fresh) }
   }
 }
 
@@ -354,16 +368,24 @@ async function pay (h, s) {
 function confirmPay (c, h) {
   return new Promise((resolve) => {
     $('#track').hidden = false
-    fill($('#track-msg'), el('div', { class: 'card' },
-      el('span', { class: 'label' }, 'Checked by your wallet'),
-      el('strong', {}, `Pay ${money(c.amount)} ${DOLLAR} to ${c.hub || h.name}`),
-      el('span', { class: 'small' }, c.description || ''),
-      el('span', { class: 'small muted mono' }, `Asset ${c.assetId}`),
-      el('div', { class: 'row' },
-        el('button', { class: 'btn primary', type: 'button', on: { click: () => resolve(true) } }, 'Confirm and pay'),
-        el('button', { class: 'btn', type: 'button', on: { click: () => resolve(false) } }, 'Cancel'))))
+    fill($('#track-steps'))
+    fill($('#track-msg'), el('div', { class: 'confirm' },
+      el('div', { class: 'row' }, el('span', { class: 'cell-icon green' }, icon('checkCircle', { size: 16 })), el('h3', {}, 'Checked by your wallet')),
+      el('div', { class: 'stack', style: 'gap:8px' },
+        el('div', { class: 'kv' }, el('span', {}, 'To'), el('span', {}, c.hub || h.name)),
+        el('div', { class: 'kv' }, el('span', {}, 'For'), el('span', {}, c.description || '')),
+        el('div', { class: 'kv' }, el('span', {}, 'Amount'), el('strong', { class: 'num' }, `${money(c.amount)} ${DOLLAR}`))),
+      el('button', { class: 'btn pay block', type: 'button', on: { click: () => resolve(true) } }, `Confirm and pay ${money(c.amount)} ${DOLLAR}`),
+      el('button', { class: 'btn block', type: 'button', on: { click: () => resolve(false) } }, 'Cancel')))
   })
 }
+
+// static icons in the markup
+fill($('#brand-mark'), icon('hub', { size: 16 }))
+fill($('#open-user'), icon('user', { size: 20 }))
+fill($('#search-ico'), icon('search', { size: 18 }))
+fill($('#privacy-ico'), icon('info', { size: 18 }))
+document.querySelectorAll('[data-close]').forEach((b) => fill(b, icon('close', { size: 18 })))
 
 // served by a wallet service? use it as the first wallet
 if (!wallets.length) {
@@ -372,6 +394,6 @@ if (!wallets.length) {
 refresh()
 setInterval(() => { if (!busy && $('#device').hidden) refresh() }, 20000)
 setInterval(() => { // countdowns tick locally between refreshes
-  if ($('#device').hidden) { if (hubs.some((h) => h.services.some((s) => untilOf(s) > Date.now()))) render() }
-  else if (openDev && !busy) renderDevice(openDev.h, openDev.s)
+  if ($('#device').hidden) { if (hubs.some((h) => h.services.some((s) => statusOf(s).until > Date.now()))) render() }
+  else if (openDev && !busy && $('#track').hidden) renderDevice(openDev.h, openDev.s)
 }, 1000) // the hub blocks while rgb-lib syncs: poll gently

@@ -87,9 +87,10 @@ function percentSigned (p, text) {
   return p
 }
 
+// kind of device (chosen by the model) → icon key drawn by web/ui.js (SVG icon, or web/img/<key>.png if present)
 const ICONS = {
-  washer: '🧺', dryer: '🌀', door: '🚪', locker: '🔐', fridge: '🍺', coffee: '☕', printer: '🖨️',
-  bike: '🚲', scooter: '🛴', parking: '🅿️', charger: '🔌', room: '🛏️', tool: '🛠️', other: '🧩'
+  washer: 'washer', dryer: 'dryer', iron: 'iron', coffee: 'coffee', door: 'door', locker: 'lock', fridge: 'fridge',
+  printer: 'printer', bike: 'bike', scooter: 'bike', parking: 'parking', charger: 'charger', room: 'door', tool: 'device', other: 'device'
 }
 const TYPES = ['use', 'rent', 'access']
 const UNITS = ['use', 'wash', 'cycle', 'coffee', 'drink', 'page', 'session', 'hour']
