@@ -21,9 +21,9 @@ Deadline: last commit on `main` by **Sunday 18 October, 13:00**. Demo-ready targ
 | 6 | Host page: services, stays (send key), earnings, inbox to approve, activity log with explorer links | Vittorio | todo |
 | 7 | Guest page: my key, my HUSD, nearby services (via QR link), order + pay + live status | Vittorio | done (first version, checks asset and amount before paying) |
 | 8 | Device pages: big state (locked/open, running, rented + countdown), one per service, QR to the guest page | Vittorio | todo |
-| 9 | QVAC server running on the AI PC, reachable on the venue network | Lapo | doing |
-| 10 | `src/ai.js`: text → service JSON (3 templates), text → behaviour, text → bundle | Lapo | doing |
-| 11 | Hub routes `/api/ai/*` wired to ai.js | Lapo + Alessandro | todo |
+| 9 | QVAC server running on the AI PC, reachable on the venue network | Lapo | done (http://192.168.6.169:11434, ~1–2 s per answer) |
+| 10 | `src/ai.js`: text → service JSON (3 templates), text → behaviour, text → bundle | Lapo | done |
+| 11 | Hub routes `/api/ai/*` wired to ai.js | Lapo + Alessandro | doing (Alessandro: paste the 3 routes from CLAUDE.md "AI contract" into hub.js) |
 | 12 | `src/behaviours.js`: rules engine (stock below, weekday price, overdue rental, notify); spending proposals go to the owner inbox | Alessandro | todo |
 | 13 | Restock proposal approved → hub pays a supplier wallet (real transfer) | Alessandro | todo |
 | 14 | Second hub (hub B) with its own wallet and 1–2 services; same guest wallet uses both | Alessandro | todo |
