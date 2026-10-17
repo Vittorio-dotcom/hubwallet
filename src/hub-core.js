@@ -69,7 +69,8 @@ export class Hub extends EventEmitter {
     this.followUntil = 0 // a burst is running until this time
     this.followSpend = 0 // a signed spend is followed until this time (nothing in payments tells us it settled)
     this.burstTimer = null
-    this.walletCache = null // { at, data }: GET /api/wallet also syncs, so cache it
+    this.syncTimer = null
+    this.walletCache = null // { at, data }: short copy for pages polling GET /api/wallet
   }
 
   async open () {
@@ -100,7 +101,7 @@ export class Hub extends EventEmitter {
     this.poll().then(() => this.syncWallet())
     return this
   }
-  stop () { clearInterval(this.timer); clearTimeout(this.burstTimer); this.burstTimer = null; this.followUntil = 0 }
+  stop () { clearInterval(this.timer); clearTimeout(this.burstTimer); clearTimeout(this.syncTimer); this.burstTimer = null; this.followUntil = 0 }
 
   // Indexer sync: bitcoin balance and UTXOs. Blocking (10–25 s), so only at quiet moments.
   async syncWallet () {
@@ -121,6 +122,7 @@ export class Hub extends EventEmitter {
     this.followUntil = Math.max(this.followUntil, until)
     if (spend) this.followSpend = Math.max(this.followSpend, until)
     console.log(`[watch] ${reason}: refresh every 5 s until settled (max 3 min)`)
+    clearTimeout(this.syncTimer) // a sync was waiting: it runs at the end of this burst instead
     if (this.burstTimer) return // already running: it now goes on until the new deadline
     const tick = async () => {
       await this.poll()
@@ -131,7 +133,8 @@ export class Hub extends EventEmitter {
       } else {
         // Sync 20 s later: it freezes the hub for 10–25 s, and pages first need to read "paid".
         this.followUntil = 0
-        this.burstTimer = setTimeout(() => { this.burstTimer = null; this.syncWallet() }, 20_000)
+        this.burstTimer = null
+        this.syncTimer = setTimeout(() => this.syncWallet(), 20_000)
       }
     }
     this.burstTimer = setTimeout(tick, 0)
