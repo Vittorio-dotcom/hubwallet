@@ -9,7 +9,7 @@
 // Host wallet passes: payer wallet API of src/guest.js (WALLET=provider), GET /api/me, POST /api/receive.
 // With no hub connected the page shows example data (marked) so it can be tried.
 // The AI never saves anything: it proposes, the hub validates, the host applies. Spending waits for the signer.
-import { el, fill, money, DOLLAR, icon, porthole, statusOf, clock, ruleText, ruleIcon } from './ui.js'
+import { el, fill, money, DOLLAR, icon, porthole, statusOf, clock, ruleText, ruleIcon, themeButton, lens } from './ui.js'
 
 const $ = (s) => document.querySelector(s)
 const load_ = (k, d) => { try { return JSON.parse(localStorage.getItem(k)) ?? d } catch { return d } }
@@ -93,6 +93,7 @@ function render () {
     el('span', { class: 'footnote' }, 'Where your earnings go')))
   fill($('#wallets'), cards)
   fill($('#dots'), cards.map((_, i) => el('span', { class: i === walletIndex ? 'on' : '' })))
+  lens([...$('#wallets').querySelectorAll('.pass:not(.add)')])
 
   // hubs
   fill($('#hub-list'), hubs.map((h, i) => el('button', { class: 'cell', type: 'button', 'aria-pressed': String(i === hubIndex), on: { click: () => { hubIndex = i; save_('hostHubIndex', i); render() } } },
@@ -373,6 +374,8 @@ $('#wallets').addEventListener('scroll', () => { const c = $('#wallets'); const 
 
 // static icons in the markup
 fill($('#brand-mark'), icon('hub', { size: 16 }))
+$('#demo-tag').after(themeButton())
+lens($('.topbar'))
 fill($('#ico-add'), icon('plus', { size: 16 }))
 fill($('#ico-doc'), icon('doc', { size: 16 }))
 document.querySelectorAll('[data-chev]').forEach((n) => fill(n, icon('chevronRight', { size: 18 })))

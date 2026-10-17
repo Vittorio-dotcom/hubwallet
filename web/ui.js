@@ -58,7 +58,10 @@ const P = {
   external: '<path d="M15 3h6v6M10 14 21 3M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/>',
   qr: '<rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/><rect x="3" y="14" width="7" height="7" rx="1.5"/><path d="M14 14h3v3M21 14v.01M17 21h4v-4M14 21v-3"/>',
   send: '<path d="M12 19V5M5 12l7-7 7 7"/>',
-  info: '<circle cx="12" cy="12" r="9.5"/><path d="M12 11v5.5M12 7.5h.01"/>'
+  info: '<circle cx="12" cy="12" r="9.5"/><path d="M12 11v5.5M12 7.5h.01"/>',
+  sun: '<circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/>',
+  moon: '<path d="M20.5 14.2A8.5 8.5 0 1 1 9.8 3.5a7 7 0 0 0 10.7 10.7Z"/>',
+  auto: '<circle cx="12" cy="12" r="9"/><path d="M12 3a9 9 0 0 1 0 18Z" fill="currentColor" stroke="none"/>'
 }
 const SVG = 'http://www.w3.org/2000/svg'
 export function icon (name, { size = 22, label } = {}) {
@@ -138,3 +141,77 @@ const WHEN = { after_hour: (v) => `After ${v}:00`, weekday: (v) => days(v)[0].to
 const DO = { lock: () => 'lock it', unlock: () => 'unlock it', set_price: (d) => `price ${money(d.price)} ${DOLLAR}`, notify: (d) => d.text ? `tell me: “${d.text}”` : 'tell me', propose_purchase: (d) => `propose ${d.reason || 'maintenance'}`, keep_deposit: () => 'keep the deposit' }
 export const ruleText = (r) => `${(WHEN[r?.when?.kind] || (() => r?.when?.kind))(r?.when?.value)}: ${(DO[r?.do?.kind] || (() => r?.do?.kind))(r?.do || {})}`
 export const ruleIcon = (r) => ({ lock: 'lock', unlock: 'lock', set_price: 'wallet', notify: 'info', propose_purchase: 'spark', keep_deposit: 'wallet' }[r?.do?.kind] || 'clock')
+
+// ---------- theme: automatic (system), light or dark; remembered on this device ----------
+// The page head sets html[data-theme] before CSS paints (no flash); this button cycles auto → light → dark.
+const THEMES = [{ v: null, icon: 'auto', label: 'Theme: automatic' }, { v: 'light', icon: 'sun', label: 'Theme: light' }, { v: 'dark', icon: 'moon', label: 'Theme: dark' }]
+const getTheme = () => { try { return localStorage.getItem('hw-theme') } catch { return null } }
+function setTheme (v) {
+  if (v) document.documentElement.dataset.theme = v; else delete document.documentElement.dataset.theme
+  try { if (v) localStorage.setItem('hw-theme', v); else localStorage.removeItem('hw-theme') } catch {}
+  document.querySelector('meta[name="color-scheme"]')?.setAttribute('content', v || 'light dark')
+}
+export function themeButton () {
+  const b = el('button', { class: 'icon-btn theme-btn', type: 'button' })
+  const draw = () => { const t = THEMES.find((x) => x.v === getTheme()) || THEMES[0]; b.setAttribute('aria-label', t.label); b.title = t.label; fill(b, icon(t.icon, { size: 18 })) }
+  b.addEventListener('click', () => { const i = THEMES.findIndex((x) => x.v === getTheme()); setTheme(THEMES[(i + 1) % THEMES.length].v); draw() })
+  draw()
+  return b
+}
+
+// ---------- liquid glass refraction (Chrome / Edge) ----------
+// Technique from kube.io "Liquid Glass in CSS and SVG": a displacement map shaped like the element's rim bends
+// what is behind the glass near its edges (feDisplacementMap used as a backdrop-filter). Other browsers keep the
+// frosted glass of app.css. Filters are cached by size, so re-rendered elements of the same size share one.
+const chromium = typeof navigator !== 'undefined' && /(Chrome|Edg)\//.test(navigator.userAgent) && !/Firefox|FxiOS/.test(navigator.userAgent)
+const reduceTransparency = () => matchMedia('(prefers-reduced-transparency: reduce)').matches
+let defs = null
+const lensCache = new Map()
+function lensFilter (w, h, r, bezel = 22, scale = 46) {
+  const key = `${w}x${h}x${r}`
+  if (lensCache.has(key)) return lensCache.get(key)
+  const c = document.createElement('canvas'); c.width = w; c.height = h
+  const g = c.getContext('2d'); const img = g.createImageData(w, h); const px = img.data
+  const cx = w / 2; const cy = h / 2; const hx = w / 2 - r; const hy = h / 2 - r
+  for (let y = 0; y < h; y++) {
+    for (let x = 0; x < w; x++) {
+      // distance to the rounded-rect rim and the outward normal there
+      const ax = Math.abs(x + 0.5 - cx); const ay = Math.abs(y + 0.5 - cy); const sx = Math.sign(x + 0.5 - cx) || 1; const sy = Math.sign(y + 0.5 - cy) || 1
+      const dx = ax - hx; const dy = ay - hy
+      let dist; let nx = 0; let ny = 0
+      if (dx > 0 && dy > 0) { const l = Math.hypot(dx, dy) || 1; dist = r - l; nx = (dx / l) * sx; ny = (dy / l) * sy } else if (dx > dy) { dist = w / 2 - ax; nx = sx } else { dist = h / 2 - ay; ny = sy }
+      const t = Math.max(0, Math.min(1, 1 - dist / bezel)); const m = t * t // convex bevel: strongest at the rim
+      const i = (y * w + x) * 4
+      px[i] = 128 - nx * m * 127; px[i + 1] = 128 - ny * m * 127; px[i + 2] = 128; px[i + 3] = 255 // sample from inside the glass
+    }
+  }
+  g.putImageData(img, 0, 0)
+  if (!defs) {
+    const svg = document.createElementNS(SVG, 'svg'); svg.setAttribute('width', '0'); svg.setAttribute('height', '0'); svg.setAttribute('aria-hidden', 'true')
+    svg.style.position = 'absolute'; defs = document.createElementNS(SVG, 'defs'); svg.append(defs); document.body.append(svg)
+  }
+  const id = 'lens-' + lensCache.size
+  const f = document.createElementNS(SVG, 'filter')
+  for (const [k, v] of Object.entries({ id, x: 0, y: 0, width: w, height: h, filterUnits: 'userSpaceOnUse', 'color-interpolation-filters': 'sRGB' })) f.setAttribute(k, v)
+  const fi = document.createElementNS(SVG, 'feImage')
+  for (const [k, v] of Object.entries({ href: c.toDataURL(), x: 0, y: 0, width: w, height: h, result: 'map', preserveAspectRatio: 'none' })) fi.setAttribute(k, v)
+  const fd = document.createElementNS(SVG, 'feDisplacementMap')
+  for (const [k, v] of Object.entries({ in: 'SourceGraphic', in2: 'map', scale, xChannelSelector: 'R', yChannelSelector: 'G' })) fd.setAttribute(k, v)
+  f.append(fi, fd); defs.append(f)
+  lensCache.set(key, id)
+  return id
+}
+const observed = new WeakSet()
+const sizer = typeof ResizeObserver !== 'undefined' ? new ResizeObserver((entries) => entries.forEach((e) => applyLens(e.target))) : null
+function applyLens (node) {
+  const w = Math.round(node.offsetWidth); const h = Math.round(node.offsetHeight)
+  if (!w || !h || w * h > 900_000) return
+  const r = Math.min(parseFloat(getComputedStyle(node).borderTopLeftRadius) || 0, h / 2, w / 2)
+  node.style.setProperty('--lens', `url(#${lensFilter(w, h, Math.round(r))})`)
+  node.classList.add('lens')
+}
+// Give these elements real refraction (call again after re-rendering them).
+export function lens (...nodes) {
+  if (!chromium || reduceTransparency()) return
+  for (const n of nodes.flat()) { if (!n) continue; applyLens(n); if (sizer && !observed.has(n)) { sizer.observe(n); observed.add(n) } }
+}

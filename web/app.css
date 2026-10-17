@@ -1,19 +1,25 @@
 /* HubWallet design system — guest app, host app, device screen.
-   Apple-like: system type, quiet greys, one blue accent, inset grouped lists, sheets, pill buttons.
+   Apple Liquid Glass: an ambient colour field behind the page, translucent glass surfaces on top
+   (blur + saturation, a luminous rim, a top glint), real edge refraction on the wallet pass and the
+   top bar where the browser supports SVG backdrop filters (Chrome, Edge), frosted glass elsewhere.
    The one memorable element is the porthole: a device's status ring, shaped like a washing-machine door.
-   Light and dark themes; reduced motion respected; targets ≥ 44 px. */
+   Themes: light, dark, or automatic (html[data-theme] set by web/ui.js, else the system setting).
+   Accessibility: reduced transparency → opaque surfaces; reduced motion respected; targets ≥ 44 px. */
 
 :root {
-  --bg: #f5f5f7; --surface: #ffffff; --surface-2: #f2f2f7; --fill: rgba(120,120,128,.12); --sep: rgba(60,60,67,.18);
-  --ink: #1d1d1f; --ink-2: #6e6e73; --ink-3: #8e8e93;
-  --blue: #0071e3; --blue-ink: #ffffff; --blue-soft: rgba(0,113,227,.1);
-  --green: #248a3d; --green-soft: rgba(52,199,89,.14);
-  --red: #d70015; --red-soft: rgba(255,59,48,.12);
-  --orange: #c93400; --orange-soft: rgba(255,149,0,.14);
+  --bg: #eef0f5; --surface: #ffffff; --surface-2: #f2f2f7; --fill: rgba(120,120,128,.12); --sep: rgba(60,60,67,.16);
+  --ink: #1d1d1f; --ink-2: #5f5f66; --ink-3: #8a8a90;
+  --blue: #0071e3; --blue-ink: #ffffff; --blue-soft: rgba(0,113,227,.12);
+  --green: #1f7a37; --green-soft: rgba(52,199,89,.16);
+  --red: #c80014; --red-soft: rgba(255,59,48,.13);
+  --orange: #b33000; --orange-soft: rgba(255,149,0,.16);
   --pay: #000000; --pay-ink: #ffffff;
-  --pass-a: #1c1c1e; --pass-b: #3a3a3c; --pass-ink: #ffffff;
-  --shadow: 0 1px 2px rgba(0,0,0,.04), 0 8px 24px rgba(0,0,0,.06);
-  --r-s: 10px; --r-m: 14px; --r-l: 22px; --r-xl: 30px;
+  --shadow: 0 1px 1px rgba(0,0,0,.03), 0 10px 30px rgba(31,38,64,.10);
+  --glass: rgba(255,255,255,.56); --glass-strong: rgba(255,255,255,.74); --glass-weak: rgba(255,255,255,.38);
+  --glass-rim: rgba(255,255,255,.75); --glass-glint: rgba(255,255,255,.9); --glass-shade: rgba(31,38,64,.08);
+  --amb-1: rgba(0,122,255,.42); --amb-2: rgba(191,90,242,.36); --amb-3: rgba(48,209,160,.30); --amb-base: #eceef5;
+  --blur: blur(22px) saturate(185%);
+  --r-s: 10px; --r-m: 16px; --r-l: 24px; --r-xl: 30px;
   --font: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Inter", system-ui, sans-serif;
   --font-display: -apple-system, BlinkMacSystemFont, "SF Pro Display", "Inter", system-ui, sans-serif;
   --mono: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
@@ -21,18 +27,34 @@
   color-scheme: light;
 }
 @media (prefers-color-scheme: dark) {
-  :root {
+  :root:not([data-theme="light"]) {
     --bg: #000000; --surface: #1c1c1e; --surface-2: #2c2c2e; --fill: rgba(120,120,128,.24); --sep: rgba(84,84,88,.6);
-    --ink: #f5f5f7; --ink-2: #98989d; --ink-3: #7c7c80;
-    --blue: #0a84ff; --blue-soft: rgba(10,132,255,.18);
-    --green: #30d158; --green-soft: rgba(48,209,88,.16);
-    --red: #ff453a; --red-soft: rgba(255,69,58,.16);
-    --orange: #ff9f0a; --orange-soft: rgba(255,159,10,.16);
+    --ink: #f5f5f7; --ink-2: #a1a1a6; --ink-3: #7c7c80;
+    --blue: #0a84ff; --blue-soft: rgba(10,132,255,.2);
+    --green: #30d158; --green-soft: rgba(48,209,88,.18);
+    --red: #ff453a; --red-soft: rgba(255,69,58,.18);
+    --orange: #ff9f0a; --orange-soft: rgba(255,159,10,.18);
     --pay: #ffffff; --pay-ink: #000000;
-    --pass-a: #2c2c2e; --pass-b: #48484a;
-    --shadow: none;
+    --shadow: 0 1px 1px rgba(0,0,0,.3), 0 12px 32px rgba(0,0,0,.35);
+    --glass: rgba(30,30,34,.52); --glass-strong: rgba(36,36,40,.72); --glass-weak: rgba(44,44,48,.36);
+    --glass-rim: rgba(255,255,255,.16); --glass-glint: rgba(255,255,255,.14); --glass-shade: rgba(0,0,0,.35);
+    --amb-1: rgba(10,132,255,.45); --amb-2: rgba(94,92,230,.38); --amb-3: rgba(48,209,88,.22); --amb-base: #050507;
     color-scheme: dark;
   }
+}
+:root[data-theme="dark"] {
+    --bg: #000000; --surface: #1c1c1e; --surface-2: #2c2c2e; --fill: rgba(120,120,128,.24); --sep: rgba(84,84,88,.6);
+    --ink: #f5f5f7; --ink-2: #a1a1a6; --ink-3: #7c7c80;
+    --blue: #0a84ff; --blue-soft: rgba(10,132,255,.2);
+    --green: #30d158; --green-soft: rgba(48,209,88,.18);
+    --red: #ff453a; --red-soft: rgba(255,69,58,.18);
+    --orange: #ff9f0a; --orange-soft: rgba(255,159,10,.18);
+    --pay: #ffffff; --pay-ink: #000000;
+    --shadow: 0 1px 1px rgba(0,0,0,.3), 0 12px 32px rgba(0,0,0,.35);
+    --glass: rgba(30,30,34,.52); --glass-strong: rgba(36,36,40,.72); --glass-weak: rgba(44,44,48,.36);
+    --glass-rim: rgba(255,255,255,.16); --glass-glint: rgba(255,255,255,.14); --glass-shade: rgba(0,0,0,.35);
+    --amb-1: rgba(10,132,255,.45); --amb-2: rgba(94,92,230,.38); --amb-3: rgba(48,209,88,.22); --amb-base: #050507;
+    color-scheme: dark;
 }
 
 /* ---------- base ---------- */
@@ -127,8 +149,8 @@ button.cell:active { background: var(--fill) }
 }
 
 /* ---------- the wallet pass ---------- */
-.passes { display: grid; grid-auto-flow: column; grid-auto-columns: 100%; gap: 14px; overflow-x: auto; scroll-snap-type: x mandatory; scrollbar-width: none; margin: -12px -20px -16px; padding: 12px 20px 28px; scroll-padding: 0 20px }
-.host-side .passes { margin: -12px -6px -16px; padding: 12px 6px 28px; scroll-padding: 0 6px }
+.passes { display: grid; grid-auto-flow: column; grid-auto-columns: 100%; gap: 14px; overflow-x: auto; scroll-snap-type: x mandatory; scrollbar-width: none; margin: -16px -20px -28px; padding: 16px 20px 44px; scroll-padding: 0 20px }
+.host-side .passes { margin: -16px -6px -28px; padding: 16px 6px 44px; scroll-padding: 0 6px }
 .passes::-webkit-scrollbar { display: none }
 .pass { scroll-snap-align: start; position: relative; min-height: 196px; padding: 20px 22px; border-radius: var(--r-l); border: 0; text-align: left; color: var(--pass-ink);
   background: radial-gradient(120% 140% at 100% 0%, var(--pass-b), var(--pass-a) 60%); box-shadow: 0 12px 32px rgba(0,0,0,.18); display: flex; flex-direction: column; justify-content: space-between; overflow: hidden }
@@ -279,3 +301,84 @@ details.json-box summary { cursor: pointer; color: var(--blue); font-size: 15px;
 .screen-pay { display: flex; gap: 20px; align-items: center; background: var(--surface); border-radius: var(--r-l); padding: 18px; box-shadow: var(--shadow); text-align: left }
 .screen-pay #qr { background: #fff; padding: 10px; border-radius: var(--r-m); flex: none; line-height: 0 }
 .picker { display: grid; gap: 14px; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)) }
+
+/* =====================================================================
+   LIQUID GLASS LAYER (overrides the solid surfaces above)
+   ===================================================================== */
+
+/* the ambient colour field the glass refracts: three soft lights on a quiet base, fixed behind the page */
+body { background: transparent }
+html { background: var(--amb-base) }
+body::before { content: ""; position: fixed; inset: -10vmax; z-index: -1; pointer-events: none;
+  background:
+    radial-gradient(48vmax 44vmax at 8% 12%, var(--amb-1), transparent 70%),
+    radial-gradient(42vmax 42vmax at 96% 38%, var(--amb-2), transparent 70%),
+    radial-gradient(50vmax 40vmax at 40% 100%, var(--amb-3), transparent 72%) }
+@media (prefers-reduced-motion: no-preference) {
+  body::before { animation: drift 28s ease-in-out infinite alternate }
+  @keyframes drift { to { transform: translate3d(3vmax, -2vmax, 0) rotate(6deg) } }
+}
+
+/* the glass material: translucent fill, blur + saturation, a luminous rim and a top glint */
+.glass, .group, .overview, .device-card, .confirm, .proposal, .screen-pay, .composer, .sign-banner,
+.pass, .sheet-panel, .topbar, .icon-btn, .seg, .hub-switch button, .suggest button, .field, .badge, .example-tag {
+  -webkit-backdrop-filter: var(--blur); backdrop-filter: var(--blur) }
+.group, .overview, .device-card, .confirm, .proposal, .screen-pay, .sign-banner {
+  background: var(--glass); box-shadow: inset 0 1px 0 var(--glass-glint), inset 0 0 0 1px var(--glass-rim), var(--shadow) }
+.composer { background: var(--glass-strong); box-shadow: inset 0 1px 0 var(--glass-glint), inset 0 0 0 1px var(--glass-rim), var(--shadow) }
+.device-card.add { background: var(--glass-weak); box-shadow: inset 0 0 0 1.5px var(--glass-rim) }
+.sign-banner { background: color-mix(in srgb, var(--orange-soft) 60%, var(--glass)) }
+.field { background: var(--glass-weak); box-shadow: inset 0 0 0 1px var(--glass-rim) }
+.icon-btn { background: var(--glass); box-shadow: inset 0 1px 0 var(--glass-glint), inset 0 0 0 1px var(--glass-rim), 0 4px 14px var(--glass-shade) }
+.seg { background: var(--glass-weak); box-shadow: inset 0 0 0 1px var(--glass-rim) }
+.seg button[aria-selected="true"], .seg button[aria-pressed="true"] { background: var(--glass-strong); box-shadow: inset 0 1px 0 var(--glass-glint), 0 2px 8px var(--glass-shade) }
+.suggest button, .hub-switch button { background: var(--glass); box-shadow: inset 0 0 0 1px var(--glass-rim) }
+.btn { background: var(--glass); box-shadow: inset 0 1px 0 var(--glass-glint), inset 0 0 0 1px var(--glass-rim); -webkit-backdrop-filter: var(--blur); backdrop-filter: var(--blur) }
+.btn.primary { background: linear-gradient(180deg, color-mix(in srgb, var(--blue) 82%, #fff), var(--blue)); box-shadow: inset 0 1px 0 rgba(255,255,255,.35), 0 6px 18px color-mix(in srgb, var(--blue) 35%, transparent) }
+.btn.pay { background: var(--pay); box-shadow: inset 0 1px 0 rgba(255,255,255,.18), 0 10px 26px rgba(0,0,0,.25) }
+.btn.danger { background: var(--red-soft); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--red) 25%, transparent) }
+.btn.plain { background: transparent; box-shadow: none; -webkit-backdrop-filter: none; backdrop-filter: none }
+.cell + .cell::before { border-top-color: var(--sep) }
+.notice { -webkit-backdrop-filter: var(--blur); backdrop-filter: var(--blur) }
+
+/* the top bar floats as a glass capsule */
+.topbar { margin: 10px -8px 0; padding: 6px 8px 6px 14px; border-radius: 999px; top: 10px;
+  background: var(--glass); box-shadow: inset 0 1px 0 var(--glass-glint), inset 0 0 0 1px var(--glass-rim), 0 8px 30px var(--glass-shade) }
+.host .topbar { margin: 10px 0 22px }
+
+/* the wallet pass becomes a glass card: thick material, bright rim, specular sheen */
+.pass { color: var(--ink); background: var(--glass-strong); isolation: isolate;
+  box-shadow: inset 0 1px 0 var(--glass-glint), inset 0 0 0 1px var(--glass-rim), 0 18px 40px var(--glass-shade) }
+.pass::after { right: auto; left: -30%; top: -60%; bottom: auto; width: 160%; height: 120%; border: 0; border-radius: 0;
+  background: linear-gradient(115deg, rgba(255,255,255,.55) 0%, rgba(255,255,255,0) 38%); opacity: .55; z-index: -1 }
+.pass .pass-top, .pass .pass-foot { opacity: 1; color: var(--ink-2) }
+.pass .amount small { color: var(--ink-2); opacity: 1 }
+.pass.add { background: var(--glass-weak) }
+.pass.off { background: var(--glass-weak) }
+:root[data-theme="dark"] .pass::after { opacity: .18 }
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) .pass::after { opacity: .18 } }
+
+/* sheets: the panel is glass over a dimmed, blurred page */
+.sheet { background: rgba(0,0,0,.22); -webkit-backdrop-filter: blur(6px); backdrop-filter: blur(6px) }
+.sheet-panel { background: var(--glass-strong); box-shadow: inset 0 1px 0 var(--glass-glint), inset 0 0 0 1px var(--glass-rim), 0 -10px 40px var(--glass-shade) }
+.sheet-head { background: transparent }
+
+/* porthole: the inner disc is a little glass lens */
+.porthole .art { background: var(--glass-strong); box-shadow: inset 0 1px 0 var(--glass-glint), inset 0 0 0 1px var(--glass-rim) }
+.chat .msg.ai { background: var(--glass-strong); box-shadow: inset 0 0 0 1px var(--glass-rim) }
+
+/* real refraction (Chrome/Edge): web/ui.js adds .lens and an SVG displacement filter sized to the element */
+.lens { -webkit-backdrop-filter: var(--lens) blur(14px) saturate(190%); backdrop-filter: var(--lens) blur(14px) saturate(190%) }
+
+/* theme switch in the top bar */
+.theme-btn { width: 36px; height: 36px }
+
+/* reduced transparency (e.g. Windows "Transparency effects" off): denser, more readable glass;
+   the material, the light and the colour field stay, only the see-through is reduced */
+@media (prefers-reduced-transparency: reduce) {
+  :root { --glass: rgba(255,255,255,.8); --glass-strong: rgba(255,255,255,.9); --glass-weak: rgba(255,255,255,.62) }
+  :root[data-theme="dark"] { --glass: rgba(30,30,34,.82); --glass-strong: rgba(36,36,40,.9); --glass-weak: rgba(44,44,48,.66) }
+}
+@media (prefers-reduced-transparency: reduce) and (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) { --glass: rgba(30,30,34,.82); --glass-strong: rgba(36,36,40,.9); --glass-weak: rgba(44,44,48,.66) }
+}

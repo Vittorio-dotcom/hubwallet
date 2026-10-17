@@ -1,7 +1,7 @@
 // HubWallet device screen logic. Reads the hub's public API every 3 s and shows the device state big:
 // the porthole ring fills while the device runs, with a countdown; a QR code opens the guest app on this hub.
 // Falls back to example data (marked) while no hub answers.
-import { el, fill, money, DOLLAR, icon, porthole, statusOf, clock, ruleText, ruleIcon } from './ui.js'
+import { el, fill, money, DOLLAR, icon, porthole, statusOf, clock, ruleText, ruleIcon, themeButton } from './ui.js'
 
 const $ = (s) => document.querySelector(s)
 const qs = new URLSearchParams(location.search)
@@ -24,6 +24,7 @@ const EXAMPLE = { name: 'Lavanderia', dollar: DOLLAR, services: [
 const opensAt = (s) => { const u = (s.rules || []).find((r) => r.when?.kind === 'after_hour' && r.do?.kind === 'unlock'); return u ? `${u.when.value}:00` : null }
 
 let data = null; let example = false; let lastKey = ''
+const theme = themeButton() // one button, kept across redraws
 async function load () {
   try {
     const info = await get('/api/hub/info').catch(() => null)
@@ -37,7 +38,7 @@ async function load () {
 function render () {
   const screen = $('#screen')
   const top = el('div', { class: 'screen-top' }, el('span', { class: 'brand-mark' }, icon('hub', { size: 16 })), el('span', { class: 'grow' }, data.name || 'Hub'),
-    example ? el('span', { class: 'example-tag' }, 'Example data') : null)
+    example ? el('span', { class: 'example-tag' }, 'Example data') : null, theme)
 
   if (!ID) { // which device does this screen stand for?
     fill(screen, top, el('div', { class: 'title-block' }, el('h1', {}, 'Choose a device'), el('p', {}, 'This screen will show its status and a code to pay.')),
