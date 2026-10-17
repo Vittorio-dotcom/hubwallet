@@ -65,8 +65,8 @@ Tasks about stay keys and the door (3, part of 19) and the bike (5) are **droppe
 |---|---|---|---|---|
 | 19 | Host app (docs/HOST-APP.md): wallet cards, hubs with earnings + sweep, To sign, devices, add device, edit by text with diff + Apply | 2.6, 6 | Sat 18:00 | done on example data; next: wire to the real routes |
 | 20 | "To sign" view in the host app: pending items with summary, approve / reject (the signer signs) | 2.3 | Sat 18:00 | todo |
-| 21 | Guest app (rebuild): wallet cards (swipe, connect wallet), hub search, devices, pay → live status | 2.6 A | Sat 18:00 | done on example data; next: pay with `/api/check` + `/api/pay-request` (API_usage.md §4) |
-| 22 | Device pages: big state, countdown, device functions with `lastTriggered`, QR to the guest app | 4 | Sat evening | todo |
+| 21 | Guest app (rebuild): wallet cards (swipe, connect wallet), hub search, devices, pay → live status | 2.6 A | Sat 18:00 | done: pays with `/api/check` + confirmation + `/api/pay-request`, follows `/api/payments/:id`, keeps the receipt (API_usage.md §4); needs task 34 for `/api/services` |
+| 22 | Device pages: big state, countdown, device functions with `lastTriggered`, QR to the guest app | 4 | Sat evening | done (`web/device.html?id=<serviceId>`, reads public `/api/services`; needs task 34) |
 | 23 | Host AI panel: create services/behaviours by text, add a device by descriptor, upload documents | 3 | Sun 10:00 | todo |
 | 27 | "Ask the home" box in the guest app (calls `/api/ai/bundle`) | 3 | Sun 10:00 | dropped (no AI on the guest side) |
 
