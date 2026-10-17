@@ -199,11 +199,13 @@ function track (step, msg, cls, link) {
 
 async function pay (h, s) {
   busy = true; renderDevice(h, s)
+  let done = false
   try {
     if (demo) { // example mode: show the steps without touching any wallet
       for (let i = 0; i <= 3; i++) { track(i, i === 3 ? '' : 'Example data: nothing is really paid.'); await new Promise((r) => setTimeout(r, 900)) }
       track(4, s.type === 'access' ? 'The door is open.' : `${s.name} is yours.`, 'ok')
-      return
+      done = true
+      return done
     }
     // A key goes only to the hub that issued it: the key's name starts with that hub's name.
     const key = s.type === 'access' ? keyFor(h) : null
@@ -221,7 +223,7 @@ async function pay (h, s) {
       await new Promise((r) => setTimeout(r, 4000))
       if (i % 3 === 0) api('/api/refresh', {}).catch(() => {})
       const o = await api(`${h.url}/api/orders/${encodeURIComponent(order.id)}`)
-      if (o.status === 'paid') { track(4, s.type === 'access' ? 'The door is open. Welcome!' : s.type === 'rent' ? `${s.name} is yours for ${hours} h.` : `${s.name} started.`, 'ok', paid.link); break }
+      if (o.status === 'paid') { done = true; track(4, s.type === 'access' ? 'The door is open. Welcome!' : s.type === 'rent' ? `${s.name} is yours for ${hours} h.` : `${s.name} started.`, 'ok', paid.link); break }
       if (['failed', 'underpaid', 'expired'].includes(o.status)) { track(2, 'The hub did not accept this payment. Nothing was activated.', 'bad', paid.link); break }
     }
   } catch (e) {
@@ -232,6 +234,7 @@ async function pay (h, s) {
     const fresh = hubs.find((x) => x.url === h.url)?.services.find((x) => x.id === s.id)
     if (fresh && !$('#device').hidden) renderDevice(h, fresh)
   }
+  return done
 }
 
 // ---------- "Ask the laundry": the hub's local AI turns a sentence into a bundle ----------
@@ -244,19 +247,31 @@ async function ask (text) {
   try {
     items = demo ? [{ serviceId: 'washer' }, { serviceId: 'dryer' }] : await api(`${h.url}/api/ai/bundle`, { text })
   } catch (e) { $('#ask-out').replaceChildren(el('div', { class: 'notice bad' }, e.message)); return }
-  const lines = (Array.isArray(items) ? items : []).map((it) => h.services.find((s) => s.id === it.serviceId && s.type === 'use')).filter(Boolean)
+  // Keep only known pay-per-use devices with a valid price, each at most once.
+  const seen = new Set()
+  const lines = (Array.isArray(items) ? items : [])
+    .map((it) => h.services.find((s) => s.id === it.serviceId && s.type === 'use' && Number.isInteger(s.price) && s.price > 0))
+    .filter((s) => s && !seen.has(s.id) && seen.add(s.id))
   if (!lines.length) { $('#ask-out').replaceChildren(el('p', { class: 'small muted' }, 'No matching device. Try "a wash and then the dryer".')); return }
   const total = lines.reduce((sum, s) => sum + s.price, 0)
   $('#ask-out').replaceChildren(el('div', { class: 'card' },
     el('span', { class: 'label' }, 'Proposed by the laundry'),
     el('div', { class: 'list' }, ...lines.map((s) => el('div', {}, el('span', { 'aria-hidden': 'true' }, s.icon), el('span', { class: 'grow' }, s.name), el('span', { class: 'mono' }, `${money(s.price)} ${DOLLAR}`)))),
     el('div', { class: 'total' }, el('span', {}, 'Total'), el('span', {}, `${money(total)} ${DOLLAR}`)),
-    el('button', { class: 'btn primary block', type: 'button', on: { click: () => payBundle(h, lines) } }, `Pay ${money(total)} ${DOLLAR}`)))
+    el('button', { class: 'btn primary block', type: 'button', on: { click: () => payBundle(h, lines, total) } }, `Pay ${money(total)} ${DOLLAR}`)))
 }
 // One device after the other: the second payment starts when the first is confirmed
 // (the guest's dollars sit on one UTXO, which is busy until the first transfer settles).
-async function payBundle (h, list) {
-  for (const s of list) { openDevice(h, s); await pay(h, s); if ($('#track-msg').textContent.includes('did not') || $('#track .notice.bad')) break }
+// Never pays more than the total the guest approved: each payment is checked against what is left.
+async function payBundle (h, list, approved) {
+  let left = approved
+  for (const s of list) {
+    if (s.price > left) break
+    openDevice(h, s)
+    const ok = await pay(h, s)
+    if (!ok) break
+    left -= s.price
+  }
 }
 $('#ask-form').addEventListener('submit', (e) => { e.preventDefault(); ask($('#ask-text').value) })
 
