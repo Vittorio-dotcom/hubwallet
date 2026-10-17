@@ -14,11 +14,11 @@
   --red: #c80014; --red-soft: rgba(255,59,48,.13);
   --orange: #b33000; --orange-soft: rgba(255,149,0,.16);
   --pay: #000000; --pay-ink: #ffffff;
-  --shadow: 0 1px 1px rgba(0,0,0,.03), 0 10px 30px rgba(31,38,64,.10);
-  --glass: rgba(255,255,255,.26); --glass-strong: rgba(255,255,255,.5); --glass-weak: rgba(255,255,255,.14);
-  --glass-rim: rgba(255,255,255,.6); --glass-glint: rgba(255,255,255,.95); --glass-shade: rgba(31,38,64,.12);
-  --glass-edge: rgba(15,23,42,.13); --glass-outline: rgba(15,23,42,.07);
-  --amb-1: rgba(0,122,255,.55); --amb-2: rgba(191,90,242,.45); --amb-3: rgba(48,209,160,.40); --amb-4: rgba(255,149,0,.30); --amb-base: #e8ebf4;
+  --shadow: 0 1px 2px rgba(15,23,42,.08), 0 14px 34px rgba(15,23,42,.16);
+  --glass: rgba(255,255,255,.42); --glass-strong: rgba(255,255,255,.62); --glass-weak: rgba(255,255,255,.24);
+  --glass-rim: rgba(255,255,255,.6); --glass-glint: rgba(255,255,255,.95); --glass-shade: rgba(15,23,42,.18);
+  --glass-edge: rgba(15,23,42,.16); --glass-outline: rgba(15,23,42,.13);
+  --amb-1: rgba(0,122,255,.62); --amb-2: rgba(175,82,222,.55); --amb-3: rgba(48,190,160,.48); --amb-4: rgba(255,149,0,.36); --amb-base: #d9dfec;
   --blur: blur(14px) saturate(210%) brightness(1.06);
   --r-s: 10px; --r-m: 16px; --r-l: 24px; --r-xl: 30px;
   --font: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Inter", system-ui, sans-serif;
@@ -497,3 +497,23 @@ body::before { content: ""; position: fixed; inset: -10vmax; z-index: -1; pointe
 .sheet-panel { background-color: rgba(255,255,255,.62) }
 :root[data-theme="dark"] .sheet-panel { background-color: var(--glass-strong) }
 @media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) .sheet-panel { background-color: var(--glass-strong) } }
+
+
+/* ---------- light theme contrast: tinted buttons and readable fields (dark theme unchanged) ---------- */
+:root:not([data-theme="dark"]) { --tint: rgba(0,113,227,.13); --tint-hover: rgba(0,113,227,.2); --field: rgba(255,255,255,.7) }
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) { --tint: var(--glass); --tint-hover: var(--glass-strong); --field: var(--glass-weak) } }
+:root[data-theme="dark"] { --tint: var(--glass); --tint-hover: var(--glass-strong); --field: var(--glass-weak) }
+/* secondary buttons: Apple "tinted" style, a clear blue fill instead of glass on glass */
+.btn:not(.primary):not(.pay):not(.danger):not(.plain), .suggest button { background-color: var(--tint); color: var(--blue) }
+.btn:not(.primary):not(.pay):not(.danger):not(.plain):hover, .suggest button:hover { background-color: var(--tint-hover) }
+.suggest button { color: var(--blue); font-weight: 600 }
+/* round icon buttons: solid enough to read as buttons */
+.icon-btn { background-color: var(--field) }
+.field, .composer { background-color: var(--field) }
+.seg { background-color: rgba(120,120,128,.16) }
+:root[data-theme="dark"] .seg { background-color: var(--glass-weak) }
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) .seg { background-color: var(--glass-weak) } }
+/* text that sits on the colour field: a little stronger */
+.title-block p, .group-note, .section-head h2 { text-shadow: 0 1px 0 rgba(255,255,255,.35) }
+:root[data-theme="dark"] .title-block p, :root[data-theme="dark"] .group-note, :root[data-theme="dark"] .section-head h2 { text-shadow: none }
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) :is(.title-block p, .group-note, .section-head h2) { text-shadow: none } }
