@@ -52,7 +52,8 @@ Owner (`X-Hub-Key`):
 | Method | Route | Body → Response |
 |---|---|---|
 | GET | `/api/devices` | → `[device JSON + state: { status: 'idle'|'running'|'locked', until? }, earned]` |
-| POST | `/api/devices` | `{ descriptor }` → `{ proposed }` (AI plug-and-play, not saved) |
+| POST | `/api/devices/chat` | `{ messages: [{ role: 'host'|'ai', text }] }` → `{ reply, proposed? }` — guided setup: the AI asks for what is missing (device, price, unit, rules) one question at a time; `proposed` = device JSON once complete (not saved) |
+| POST | `/api/devices` | `{ config }` → saved device JSON (validated) |
 | POST | `/api/devices/:id/edit` | `{ text }` → `{ proposed, diff: [{ field, from, to }] }` (AI, not saved) |
 | POST | `/api/devices/:id/apply` | `{ config }` → saved device JSON (validated, `version`+1) |
 | POST | `/api/devices/:id/rollback` | `{ version }` → saved device JSON |
