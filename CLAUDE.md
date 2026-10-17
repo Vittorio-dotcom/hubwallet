@@ -53,6 +53,8 @@ Pages are served by both servers from `web/`. Env: `HOUR_MS` (rental hour length
 `USE_MS` (pay-per-use run time), `POLL_MS` (payment check interval), `QVAC_URL` (AI server).
 
 ## Hub API (contract — change it only together with TASKS.md + a note here)
+
+> ⚠️ **Being rewritten for architecture C** (TASKS.md #1–7). The routes below describe the removed first version and will be replaced by Vittorio's Claude as the new hub is built. Build against the new section once it appears.
 Amounts are integers in **HUSD cents** (precision 2). Owner routes need header `X-Hub-Key`.
 
 Public (guests):
