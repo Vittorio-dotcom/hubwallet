@@ -58,15 +58,17 @@
   </div>
 </section>
 
-<!-- Add a device (plug-and-play) -->
+<!-- Add a device: a guided chat with the hub's AI -->
 <section class="sheet" id="add-dev" hidden aria-labelledby="add-dev-title">
   <div class="app">
     <div class="row"><button class="icon-btn" data-close type="button" aria-label="Back">‹</button><h2 class="grow" id="add-dev-title">Add a device</h2></div>
-    <div class="card">
-      <span class="label">Device descriptor</span>
-      <p class="small muted">Paste what the device says about itself, or describe it. The hub's AI proposes a configuration; nothing is saved until you apply it.</p>
-      <textarea id="descriptor" class="input" rows="5">{ "name": "Dryer", "type": "tumble dryer", "commands": ["start", "stop"], "cycle_minutes": 45 }</textarea>
-      <button class="btn primary" id="propose-device" type="button">Propose configuration</button>
+    <div class="card chat">
+      <div class="msgs" id="dev-chat" aria-live="polite"></div>
+      <form id="dev-chat-form" class="row">
+        <input id="dev-chat-text" class="input grow" placeholder="Describe the device you want to add" aria-label="Your message" autocomplete="off">
+        <button class="btn primary" type="submit">Send</button>
+      </form>
+      <p class="small muted">The hub's local AI asks what it needs and proposes a configuration. Nothing is saved until you apply it.</p>
     </div>
     <div id="add-dev-out" class="stack"></div>
   </div>

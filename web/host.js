@@ -180,15 +180,76 @@ $('#edit-form').addEventListener('submit', (e) => {
     renderDevice(); render()
   }))
 })
-$('#add-device').onclick = () => { $('#add-dev-out').replaceChildren(); show('add-dev') }
-$('#propose-device').onclick = () => {
-  const cfg = exampleDevice($('#descriptor').value)
-  if (hub().devices.some((d) => d.id === cfg.id)) cfg.id += '-' + (hub().devices.length + 1)
-  $('#add-dev-out').replaceChildren(proposal(null, cfg, () => {
-    hub().devices.push({ ...cfg, state: { status: 'idle' }, earned: 0 })
+// ---------- add a device: guided chat ----------
+// Real version: POST /api/devices/chat { messages } → { reply, proposed? } (hub AI, docs/HOST-APP.md §4).
+// Example version below: it fills the configuration slot by slot and asks for what is missing.
+let draft = null; let chat = []
+const ASK = {
+  kind: 'Hi! What device do you want to connect? For example "a dryer in the back room".',
+  price: (d) => `How much should one ${d.unit} of the ${d.name.toLowerCase()} cost, in ${DOLLAR}?`,
+  rules: (d) => `Any rules for the ${d.name.toLowerCase()}? For example "lock it after 22:00" or "maintenance every 50 uses". Say "no" if none.`
+}
+const KNOWN = [
+  { re: /dryer|asciug/, name: 'Dryer', icon: '🌀', unit: 'cycle' },
+  { re: /wash|lavatr/, name: 'Washing machine', icon: '🧺', unit: 'wash' },
+  { re: /coffee|caff/, name: 'Coffee machine', icon: '☕', unit: 'cup' },
+  { re: /iron|ferro/, name: 'Iron', icon: '🧺', unit: 'use' },
+  { re: /charg|ricaric|colonn/, name: 'Charging station', icon: '🔌', unit: 'hour' }
+]
+function say (who, text) {
+  chat.push({ who, text })
+  $('#dev-chat').replaceChildren(...chat.map((m) => el('div', { class: `msg ${m.who}` }, el('span', { class: 'by' }, m.who === 'ai' ? 'Hub AI · local' : 'You'), m.text)))
+  $('#dev-chat').scrollTop = $('#dev-chat').scrollHeight
+}
+// One question at a time: stage = 'kind' → 'price' → 'rules' → 'done'.
+let stage = 'kind'
+function ask () {
+  if (stage === 'kind') return say('ai', ASK.kind)
+  if (stage === 'price') return say('ai', ASK.price(draft))
+  if (stage === 'rules') return say('ai', ASK.rules(draft))
+  say('ai', 'Here is the configuration I propose. Check it and apply it, or tell me what to change.')
+  showDraft()
+}
+function showDraft () {
+  $('#add-dev-out').replaceChildren(proposal(null, draft, () => {
+    hub().devices.push({ ...draft, state: { status: 'idle' }, earned: 0 })
     show(null); render()
   }))
 }
+function understand (text) {
+  const t = text.toLowerCase()
+  if (stage === 'kind') {
+    const k = KNOWN.find((x) => x.re.test(t))
+    const name = k ? k.name : text.replace(/^(a|an|the|un|una|il|la)\s+/i, '').split(/[,.]/)[0].trim().slice(0, 30)
+    if (!name) return
+    let id = name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '') || 'device'
+    if (hub().devices.some((d) => d.id === id)) id += '-' + (hub().devices.length + 1)
+    draft = { id, name: name[0].toUpperCase() + name.slice(1), icon: k?.icon || '🧩', type: 'use', price: null, unit: k?.unit || 'use', commands: ['start', 'stop'], rules: [], version: 1 }
+    stage = 'price'
+  }
+  if (stage === 'price') { // the price may already be in the first sentence ("a dryer at 1.50")
+    const p = t.match(/(\d+(?:[.,]\d{1,2})?)\s*(husd|\$|€|dollar|euro)?/)
+    if (p && !/(after|dopo|every|ogni)\s*\d/.test(t)) { draft.price = Math.round(parseFloat(p[1].replace(',', '.')) * 100); stage = 'rules'; return }
+    return
+  }
+  if (stage === 'rules') { draft = { ...exampleEdit(text, draft), version: 1 }; stage = 'done'; return }
+  if (stage === 'done') { draft = { ...exampleEdit(text, draft), version: 1 } } // later edits to the proposal
+}
+$('#add-device').onclick = () => {
+  draft = null; chat = []; stage = 'kind'
+  $('#add-dev-out').replaceChildren(); $('#dev-chat-text').value = ''
+  ask(); show('add-dev'); $('#dev-chat-text').focus()
+}
+$('#dev-chat-form').addEventListener('submit', (e) => {
+  e.preventDefault()
+  const text = $('#dev-chat-text').value.trim(); if (!text) return
+  $('#dev-chat-text').value = ''
+  say('me', text)
+  const before = stage
+  understand(text)
+  if (stage === before && before !== 'done') say('ai', 'Sorry, I did not get that.')
+  if (stage === 'done' && before === 'done') { say('ai', 'Updated. Check the proposal below.'); showDraft() } else ask()
+})
 
 // ---------- hubs ----------
 $('#add-hub-form').addEventListener('submit', (e) => {
