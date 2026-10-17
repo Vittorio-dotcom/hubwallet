@@ -381,6 +381,7 @@ body::before { content: ""; position: fixed; inset: -10vmax; z-index: -1; pointe
 }
 @media (prefers-reduced-transparency: reduce) and (prefers-color-scheme: dark) {
   :root:not([data-theme="light"]) { --glass: rgba(30,30,34,.82); --glass-strong: rgba(36,36,40,.9); --glass-weak: rgba(44,44,48,.66) }
+}
 
 /* ---------- host: phone layout (below 980 px; the desktop layout above is unchanged) ----------
    Order on a phone: hub switcher (pills) → hub overview, signatures, machines, AI tools → personal wallet. */
