@@ -18,6 +18,16 @@ const POLL_MS = Number(process.env.POLL_MS || 15_000)
 
 const wallet = await new Wallet(WALLET).open()
 const STATE_FILE = path.join(wallet.dir, 'hub-state.json')
+
+// Owner routes need this key (header X-Hub-Key). Generated once, kept next to the wallet.
+const KEY_FILE = path.join(wallet.dir, 'owner-key.txt')
+if (!process.env.HUB_KEY && !fs.existsSync(KEY_FILE)) fs.writeFileSync(KEY_FILE, crypto.randomBytes(16).toString('hex') + '\n', { mode: 0o600 })
+const OWNER_KEY = Buffer.from(process.env.HUB_KEY || fs.readFileSync(KEY_FILE, 'utf8').trim())
+function owner (req, res, next) {
+  const k = Buffer.from(String(req.get('X-Hub-Key') || ''))
+  if (k.length === OWNER_KEY.length && crypto.timingSafeEqual(k, OWNER_KEY)) return next()
+  res.status(401).json({ error: 'Owner key required.' })
+}
 const id = () => crypto.randomBytes(4).toString('hex')
 
 // ---------- state (a small JSON file next to the wallet) ----------
@@ -74,6 +84,8 @@ async function createOrder (svc, { hours = 1, stayAssetId } = {}) {
   } else {
     assetId = await dollarAsset()
     if (!assetId) throw new Error(`The hub has no ${DOLLAR} asset yet.`)
+    hours = Number(hours)
+    if (!Number.isFinite(hours)) throw new Error('Hours must be a number.')
     hours = svc.type === 'rent' ? Math.min(Math.max(1, Math.round(hours)), svc.maxHours || 24) : 1
     amount = svc.price * hours
   }
@@ -110,11 +122,14 @@ async function poll () {
     await wallet.refresh()
     const waiting = state.orders.filter((o) => o.status !== 'paid' && o.status !== 'expired')
     if (waiting.length) {
-      const transfers = await wallet.transfers()
+      const byAsset = {}
       for (const o of waiting) {
-        const t = transfers.find((x) => x.recipientId === o.recipientId)
+        byAsset[o.assetId] ||= await wallet.transfers(o.assetId) // only transfers of the asset we asked for
+        const t = byAsset[o.assetId].find((x) => x.recipientId === o.recipientId)
         if (!t) continue
-        if (t.status === 'Settled') fulfil(o, t)
+        const received = (t.assignments || []).reduce((sum, a) => sum + Number(a.Fungible || 0), 0)
+        if (t.status === 'Settled' && received >= o.amount) fulfil(o, t)
+        else if (t.status === 'Settled') { o.status = 'underpaid'; save() }
         else if (t.status === 'Failed') { o.status = 'failed'; save() }
         else if (o.status !== t.status) { o.status = t.status; save() } // WaitingCounterparty / WaitingConfirmations
       }
@@ -137,14 +152,14 @@ const app = express()
 app.use(express.json())
 app.use((req, res, next) => { // the guest app runs on another machine
   res.set('Access-Control-Allow-Origin', '*')
-  res.set('Access-Control-Allow-Headers', 'Content-Type')
+  res.set('Access-Control-Allow-Headers', 'Content-Type, X-Hub-Key')
   if (req.method === 'OPTIONS') return res.sendStatus(204)
   next()
 })
 app.use(express.static(path.resolve('web')))
 const wrap = (fn) => (req, res) => fn(req, res).catch((e) => res.status(400).json({ error: String(e.message || e) }))
 
-app.get('/api/hub', wrap(async (req, res) => {
+app.get('/api/hub', owner, wrap(async (req, res) => {
   const bal = await wallet.balance()
   res.json({
     name: NAME, dollar: DOLLAR, dollarId: await dollarAsset(), hourMs: HOUR_MS,
@@ -157,7 +172,7 @@ app.get('/api/hub', wrap(async (req, res) => {
 // public view for guests: no balances, no log
 app.get('/api/services', (req, res) => res.json({ name: NAME, dollar: DOLLAR, services: state.services.map(({ earned, ...s }) => s) }))
 
-app.post('/api/services', wrap(async (req, res) => res.json(addService(req.body))))
+app.post('/api/services', owner, wrap(async (req, res) => res.json(addService(req.body))))
 
 app.post('/api/services/:id/order', wrap(async (req, res) => {
   const svc = findService(req.params.id)
@@ -172,7 +187,7 @@ app.get('/api/orders/:id', wrap(async (req, res) => {
 }))
 
 // The host gives a guest the key of a stay: a new RGB asset, quantity 1.
-app.post('/api/stays', wrap(async (req, res) => {
+app.post('/api/stays', owner, wrap(async (req, res) => {
   const { guest = 'Guest', from, to, invoice } = req.body || {}
   if (!String(invoice || '').startsWith('rgb:')) throw new Error('Paste the guest\'s RGB invoice.')
   const ticker = 'STAY' + crypto.randomBytes(2).toString('hex').toUpperCase()
@@ -185,15 +200,15 @@ app.post('/api/stays', wrap(async (req, res) => {
 }))
 
 // Admin helpers for the demo setup.
-app.post('/api/admin/utxos', wrap(async (req, res) => res.json({ created: await wallet.createUtxos(Number(req.body?.num || 5)) })))
-app.post('/api/admin/issue-dollar', wrap(async (req, res) => {
+app.post('/api/admin/utxos', owner, wrap(async (req, res) => res.json({ created: await wallet.createUtxos(Number(req.body?.num || 5)) })))
+app.post('/api/admin/issue-dollar', owner, wrap(async (req, res) => {
   const a = await wallet.issue({ ticker: DOLLAR, name: 'HubWallet test dollar', amount: Number(req.body?.amount || 1_000_000), precision: 2 })
   dollarId = a.assetId; state.dollarId = dollarId; save()
   res.json(a)
 }))
-app.post('/api/admin/send', wrap(async (req, res) => res.json(await wallet.send(req.body))))
-app.post('/api/admin/send-btc', wrap(async (req, res) => res.json(await wallet.sendBtc(req.body))))
-app.post('/api/admin/poll', wrap(async (req, res) => { await poll(); res.json({ ok: true }) }))
+app.post('/api/admin/send', owner, wrap(async (req, res) => res.json(await wallet.send(req.body))))
+app.post('/api/admin/send-btc', owner, wrap(async (req, res) => res.json(await wallet.sendBtc(req.body))))
+app.post('/api/admin/poll', owner, wrap(async (req, res) => { await poll(); res.json({ ok: true }) }))
 
-app.listen(PORT, '0.0.0.0', () => console.log(`${NAME} hub on http://0.0.0.0:${PORT} (wallet ${WALLET})`))
+app.listen(PORT, '0.0.0.0', () => console.log(`${NAME} hub on http://0.0.0.0:${PORT} (wallet ${WALLET}); owner key in ${KEY_FILE}`))
 poll()

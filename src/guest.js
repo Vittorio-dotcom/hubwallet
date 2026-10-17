@@ -34,4 +34,6 @@ app.post('/api/utxos', wrap(async (req, res) => res.json({ created: await wallet
 app.get('/api/transfers', wrap(async (req, res) => res.json(await wallet.transfers())))
 
 setInterval(() => wallet.refresh(), 20_000)
-app.listen(PORT, '0.0.0.0', () => console.log(`Guest wallet on http://0.0.0.0:${PORT} (wallet ${WALLET})`))
+// The wallet API can spend: listen on this machine only unless told otherwise.
+const HOST = process.env.GUEST_HOST || '127.0.0.1'
+app.listen(PORT, HOST, () => console.log(`Guest wallet on http://${HOST}:${PORT} (wallet ${WALLET})`))
