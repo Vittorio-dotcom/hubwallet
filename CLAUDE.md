@@ -104,6 +104,19 @@ r.post('/devices/:id/edit', owner, wrap(async (req) => { const current = loadDev
 ```
 Measured on the AI PC: edit ~1.3–3.5 s, plug-and-play ~2.5–5 s, document → rules ~10 s.
 
+## Device layer (src/devices.js, task 34 — server side by Lapo)
+Mounted in `src/hub.js` before the payment routes. Never touches the wallet: only `hub.requestPayment()` and `hub.on('paid')`.
+Env: `DOLLAR_ASSET` (rgb:… id of HUSD, required to sell; never a ticker) · `USE_MS` (one use runs, demo 45000) · `HOUR_MS` (rental hour) ·
+`DEMO_DEVICES=1` (an empty hub starts with washer 3.00 + dryer 2.00) · `QVAC_URL`, `QVAC_API_KEY` (AI). Files: `data/<hub>/devices/<id>.json` (+ `<id>.v<n>.json`), `devices-state.json`.
+Owner (`X-Hub-Key`): `GET /api/devices` → `[config + { state: { status: idle|running|locked, until? }, earned, uses, basePrice, lastTriggered }]` ·
+`POST /api/devices/chat { messages: [{ role: host|ai, text }] }` → `{ reply, proposed? }` · `POST /api/devices { config }` → saved (v1) ·
+`POST /api/devices/:id/edit { text }` → `{ proposed, diff: [{ field, from?, to? }] }` · `POST /api/devices/:id/apply { config }` → saved (version+1) ·
+`POST /api/devices/:id/rollback { version }` · `DELETE /api/devices/:id` · `GET /api/devices/notices` (counter rules: maintenance, notify) ·
+`POST /api/devices/clock { hour: 0–23 | null }` (demo: pretend it is that hour, to show "locked after 22:00").
+Public: `GET /api/services` → `{ name, dollar, dollarId, services: [{ id, name, icon, type, price (now, incl. weekday price rules), unit, rules, state }] }` ·
+`POST /api/services/:id/order { hours? }` → `{ id (= payment id), serviceId, assetId, amount, hours, invoice, recipientId, status }` (price from the device file,
+refused if running or locked) · `GET /api/orders/:id` → public payment + `serviceId` + `service`. On `paid`: device `running` for `USE_MS`, earned/uses updated.
+
 ## Rules (from the organisers — breaking them costs points)
 - **No force-push, no rebase, no amend, on any branch.** Use `git pull --no-rebase`, small commits, push often.
 - **Never commit** seeds, `data/`, keys, `.env`. The owner key is shared on Telegram, never in the repo.

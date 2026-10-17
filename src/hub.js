@@ -8,6 +8,7 @@
 // Layers built on top (services, devices, AI endpoints) can either call this HTTP API with
 // the owner key, or import the core in-process:
 //   import { createHub } from './hub-core.js'
+import { createDeviceLayer } from './devices.js' // devices, services, orders + the host's AI (docs/HOST-APP.md)
 //   const hub = await createHub({ name, walletName })
 //   const p = await hub.requestPayment({ assetId, amount: 200, description: 'Washing machine, 1 run' })
 //   hub.on('paid', (p) => { /* start the device */ })
@@ -23,6 +24,7 @@ const POLL_MS = Math.max(5_000, Number(process.env.POLL_MS || 15_000))
 const HOST = process.env.HUB_HOST || '0.0.0.0' // the hub is meant to be reached on the LAN
 
 const hub = await createHub({ name: NAME, walletName: WALLET, pollMs: POLL_MS })
+const devices = createDeviceLayer(hub) // env: DOLLAR_ASSET, USE_MS, HOUR_MS, DEMO_DEVICES, QVAC_URL, QVAC_API_KEY
 
 // Everything that changes is printed: the operator sees the money path live.
 hub.on('status', (p) => console.log(`[payment ${p.id}] ${p.status}${p.txid ? ' tx ' + p.txid : ''} — ${p.description}`))
@@ -37,6 +39,7 @@ app.use((req, res, next) => { // pages may be served by another machine (client 
   next()
 })
 if (fs.existsSync(path.resolve('web'))) app.use(express.static(path.resolve('web')))
+app.use('/api', devices.router()) // /api/devices*, /api/services*, /api/orders/:id
 app.use('/api', hub.router())
 
 app.listen(PORT, HOST, () => {

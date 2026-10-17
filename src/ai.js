@@ -24,7 +24,7 @@ const QVAC_MODEL = process.env.QVAC_MODEL || 'qwen3.5-2b'
 const QVAC_TIMEOUT_MS = Number(process.env.QVAC_TIMEOUT_MS || 90_000)
 
 const prompt = (name) => fs.readFileSync(new URL(`../prompts/${name}.md`, import.meta.url), 'utf8')
-const PROMPTS = { service: prompt('service'), rule: prompt('rule'), device: prompt('device'), edit: prompt('edit'), documentRules: prompt('document-rules') }
+const PROMPTS = { service: prompt('service'), rule: prompt('rule'), device: prompt('device'), edit: prompt('edit'), documentRules: prompt('document-rules'), chat: prompt('chat') }
 
 // One call to the model: system prompt + user text, answer forced to match `schema` (JSON schema → grammar).
 async function ask (system, text, name, schema, { maxChars = 500, maxTokens = 400 } = {}) {
@@ -75,6 +75,9 @@ function written (x, text) {
   return numbers.includes(x)
 }
 
+// Same guard for percentages: "+10%" is accepted only if 10 is written (the sign comes from the model: 10% off = -10).
+const percentWritten = (x, text) => (written(Math.abs(num(x) ?? NaN), text) ? int(x, -90, 200) : null)
+
 const ICONS = {
   washer: '🧺', dryer: '🌀', door: '🚪', locker: '🔐', fridge: '🍺', coffee: '☕', printer: '🖨️',
   bike: '🚲', scooter: '🛴', parking: '🅿️', charger: '🔌', room: '🛏️', tool: '🛠️', other: '🧩'
@@ -123,7 +126,7 @@ function buildRule (o, source, basePrice) {
   let act
   if (o.doKind === 'lock' || o.doKind === 'unlock') act = { kind: o.doKind }
   if (o.doKind === 'set_price') {
-    const p = int(o.pricePercent, -90, 200)
+    const p = percentWritten(o.pricePercent, source)
     if (written(o.priceDollars, source)) act = { kind: 'set_price', price: cents(o.priceDollars) }
     else if (p && basePrice > 0) act = { kind: 'set_price', price: Math.round(basePrice * (1 + p / 100)) } // computed here
     else throw new Error('Which price? Write it, e.g. "3 dollars" or "+20%".')
@@ -141,7 +144,7 @@ const unitFor = (type, unit) => type === 'rent' ? 'hour' : type === 'access' ? '
 const sameRule = (a, b) => JSON.stringify([a.when, a.do]) === JSON.stringify([b.when, b.do])
 
 // A rule in plain English, for the prompts (same wording as web/host.js).
-function ruleText (r) {
+export function ruleText (r) {
   const v = r.when?.value
   const when = { after_hour: `after ${v}:00`, weekday: `on ${[].concat(v).join(', ')}`, stock_below: `when stock is below ${v}`, counter_at: `every ${v} uses`, overdue: `when ${v} h overdue` }[r.when?.kind] || r.when?.kind
   const d = r.do || {}
@@ -196,6 +199,66 @@ export async function deviceToService (descriptor) {
   }
 }
 
+// ---------- add a device through a guided chat ----------
+// messages: [{ role: 'host'|'ai', text }] (the whole conversation so far) · existingIds: ids already on the hub.
+// → { reply, proposed? }. The model re-reads the conversation and fills the slots; the CODE decides what is
+// missing and asks one question at a time (device → price → rules); `proposed` = device config, not saved.
+// If the host pastes a device descriptor (JSON), it is plug-and-play: deviceToService answers at once.
+export async function chatDevice (messages, { existingIds = [] } = {}) {
+  const msgs = (Array.isArray(messages) ? messages : []).filter((m) => m && typeof m.text === 'string' && m.text.trim()).slice(-12)
+  const hostText = msgs.filter((m) => m.role === 'host').map((m) => m.text).join('\n')
+  const uniqueId = (name) => { let id = slug(name); for (let n = 2; existingIds.includes(id); n++) id = `${slug(name)}-${n}`; return id }
+  if (!hostText.trim()) return { reply: 'Hi! What device do you want to connect? For example "a dryer in the back room", or paste its descriptor (JSON).' }
+
+  const last = msgs.filter((m) => m.role === 'host').pop().text.trim()
+  if (last.startsWith('{')) { // a pasted descriptor: plug-and-play
+    let d = null
+    try { d = JSON.parse(last) } catch {}
+    if (d && typeof d === 'object') {
+      const proposed = await deviceToService(d)
+      proposed.id = uniqueId(proposed.name)
+      return { reply: 'I read the device descriptor. Here is the configuration I propose: check it and apply it, or tell me what to change.', proposed }
+    }
+  }
+
+  const transcript = msgs.map((m) => `${m.role === 'host' ? 'Host' : 'AI'}: ${m.text.trim()}`).join('\n')
+  const out = await ask(PROMPTS.chat, transcript, 'chat', {
+    type: 'object',
+    properties: {
+      name: nullable('string'),
+      kind: { type: ['string', 'null'], enum: [...Object.keys(ICONS), null] },
+      type: { type: 'string', enum: TYPES },
+      priceDollars: nullable('number'),
+      unit: { type: 'string', enum: UNITS },
+      rulesAnswered: { type: 'boolean' },
+      rules: { type: 'array', maxItems: 4, items: ruleSchema() }
+    },
+    required: ['name', 'kind', 'type', 'priceDollars', 'unit', 'rulesAnswered', 'rules'],
+    additionalProperties: false
+  }, { maxChars: 3000, maxTokens: 600 })
+
+  const name = str(out.name, 40)
+  if (!name) return { reply: 'Which device do you want to connect? For example "a dryer", "a washing machine", "an iron".' }
+  const type = TYPES.includes(out.type) ? out.type : 'use'
+  const unit = unitFor(type, out.unit)
+  const free = /\b(free|gratis|gratuit[ao])\b/i.test(hostText)
+  const price = type === 'access' || free ? 0 : (written(out.priceDollars, hostText) ? cents(out.priceDollars) : null)
+  const lower = name.toLowerCase()
+  if (price === null) return { reply: `How much should one ${unit} of the ${lower} cost, in HUSD? For example "2.50".` }
+
+  const rules = []
+  for (const o of type === 'access' ? [] : out.rules || []) {
+    try { const r = buildRule(o, hostText, price); if (!rules.some((x) => sameRule(x, r))) rules.push(r) } catch {}
+  }
+  if (!out.rulesAnswered && !rules.length && type !== 'access') {
+    return { reply: `Any rules for the ${lower}? For example "lock it after 22:00" or "maintenance every 50 uses". Say "no" if none.` }
+  }
+  // a device the host asks to lock/unlock must accept those commands
+  const commands = ['start', 'stop', ...(rules.some((r) => r.do.kind === 'lock' || r.do.kind === 'unlock') ? ['lock', 'unlock'] : [])]
+  const proposed = { id: uniqueId(name), name, icon: ICONS[out.kind] || ICONS.other, type, price, unit, commands, rules, version: 1 }
+  return { reply: 'Here is the configuration I propose. Check it and apply it, or tell me what to change.', proposed }
+}
+
 // ---------- edit a device in plain language ----------
 // "raise it to 2.50 and lock it after 22:00" + current config → proposed config (same id, version unchanged:
 // the hub increments it when the host applies). The model returns only the CHANGES; this code applies them,
@@ -227,7 +290,7 @@ export async function editDevice (text, current) {
   const name = str(out.newName, 40)
   if (name && name !== cur.name) next.name = name
   // price: only a number the host wrote, or a percentage computed here
-  const p = int(out.pricePercent, -90, 200)
+  const p = percentWritten(out.pricePercent, text)
   // "make it free": decided by the code from the words, not by the model (it is money)
   const free = /\b(free|gratis|gratuit[ao])\b/i.test(text) && !/\d/.test(text)
   if (free) next.price = 0

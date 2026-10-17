@@ -1,0 +1,252 @@
+// The device layer of a hub (docs/HOST-APP.md): which devices the hub sells, their price and rules, their state.
+// Runs inside the hub server (src/hub.js), on top of the payment layer (src/hub-core.js). It never touches the
+// wallet: it only calls hub.requestPayment() and listens to hub.on('paid').
+//
+//   data/<hub>/devices/<id>.json        current config of each device (docs/HOST-APP.md §2)
+//   data/<hub>/devices/<id>.v<n>.json   previous versions, for rollback
+//   data/<hub>/devices-state.json       runtime: status, until, earned, uses, notices, demo clock
+//
+// Env: DOLLAR_ASSET (rgb:… asset id of HUSD: required to sell; never a ticker) · USE_MS (one "use" runs this long,
+// demo 45 s) · HOUR_MS (one rental hour, demo 60 s) · DEMO_DEVICES=1 (an empty hub starts with washer + dryer).
+//
+// Routes (mounted under /api). Owner (X-Hub-Key):
+//   GET  /devices                    → [config + { state, earned, uses }]
+//   POST /devices/chat {messages}    → { reply, proposed? }   add a device by chatting with the AI (not saved)
+//   POST /devices {config}           → saved config (version 1)
+//   POST /devices/:id/edit {text}    → { proposed, diff }     AI proposal (not saved)
+//   POST /devices/:id/apply {config} → saved config (version + 1; the previous one is kept)
+//   POST /devices/:id/rollback {version} · DELETE /devices/:id
+//   GET  /devices/notices            → what the rules raised (maintenance, notify)
+//   POST /devices/clock {hour|null}  → demo: pretend it is that hour (to show "locked after 22:00")
+// Public (guest app, device pages):
+//   GET  /services                   → { name, dollar, dollarId, services: [{ id, name, icon, type, price, unit, rules, state }] }
+//   POST /services/:id/order {hours?} → { id (= payment id), serviceId, assetId, amount, invoice, recipientId, status }
+//   GET  /orders/:id                 → public payment + serviceId + service
+import fs from 'node:fs'
+import path from 'node:path'
+import express from 'express'
+import { chatDevice, editDevice, ruleText } from './ai.js'
+
+const TYPES = ['use', 'rent', 'access']
+const WHEN = ['after_hour', 'weekday', 'stock_below', 'counter_at', 'overdue']
+const DO = ['lock', 'unlock', 'set_price', 'notify', 'propose_purchase', 'keep_deposit']
+const DAYS = ['sun', 'mon', 'tue', 'wed', 'thu', 'fri', 'sat'] // index = Date.getDay()
+const ID_RE = /^[a-z0-9][a-z0-9-]{0,29}$/
+
+const DEMO = [ // the demo laundry (docs/PLAN.md "Demo scope")
+  { id: 'washer', name: 'Washing machine', icon: '🧺', type: 'use', price: 300, unit: 'wash', commands: ['start', 'stop', 'lock', 'unlock'], rules: [{ when: { kind: 'counter_at', value: 50 }, do: { kind: 'propose_purchase', reason: 'maintenance' } }], version: 1 },
+  { id: 'dryer', name: 'Dryer', icon: '🌀', type: 'use', price: 200, unit: 'cycle', commands: ['start', 'stop', 'lock', 'unlock'], rules: [], version: 1 }
+]
+
+// ---------- validation by code: the AI's proposal (or a page's request) is never saved as is ----------
+// Returns a clean config with known fields only, or throws with every problem found.
+export function validateDevice (cfg, { current } = {}) {
+  const errors = []
+  if (!cfg || typeof cfg !== 'object') throw new Error('A device configuration is required.')
+  const id = String(cfg.id || '')
+  if (!ID_RE.test(id)) errors.push('The id must be lowercase letters, digits and dashes (max 30).')
+  if (current && id !== current.id) errors.push('The device id cannot change.')
+  const name = String(cfg.name || '').trim()
+  if (!name || name.length > 40) errors.push('The name must be 1 to 40 characters.')
+  if (!TYPES.includes(cfg.type)) errors.push('Unknown device type (use, rent, access).')
+  if (!Number.isInteger(cfg.price) || cfg.price < 0 || cfg.price > 100_000) errors.push('The price must be a whole number of cents (0 to 100000).')
+  const commands = Array.isArray(cfg.commands) ? cfg.commands.filter((c) => typeof c === 'string').map((c) => c.slice(0, 30)).slice(0, 10) : []
+  const rules = []
+  for (const r of Array.isArray(cfg.rules) ? cfg.rules.slice(0, 10) : []) {
+    const w = r?.when; const d = r?.do
+    if (!WHEN.includes(w?.kind)) { errors.push(`Unknown rule condition: ${w?.kind}`); continue }
+    if (!DO.includes(d?.kind)) { errors.push(`Unknown rule action: ${d?.kind}`); continue }
+    let value = w.value
+    if (w.kind === 'after_hour' && !(Number.isInteger(value) && value >= 0 && value <= 23)) errors.push('"after_hour" needs an hour 0–23.')
+    if (['stock_below', 'counter_at'].includes(w.kind) && !(Number.isInteger(value) && value > 0)) errors.push(`"${w.kind}" needs a positive whole number.`)
+    if (w.kind === 'overdue' && !(Number.isInteger(value) && value >= 0)) value = 0
+    if (w.kind === 'weekday') { value = [].concat(value).filter((x) => DAYS.includes(x)); if (!value.length) errors.push('"weekday" needs days (mon…sun).') }
+    const act = { kind: d.kind }
+    if (d.kind === 'set_price') { if (!Number.isInteger(d.price) || d.price < 0 || d.price > 100_000) errors.push('"set_price" needs a price in whole cents.'); else act.price = d.price }
+    if (d.kind === 'notify') act.text = String(d.text || 'Rule triggered.').slice(0, 140)
+    if (d.kind === 'propose_purchase') act.reason = String(d.reason || 'maintenance').slice(0, 60)
+    if (d.kind === 'keep_deposit' && Number.isInteger(d.amount) && d.amount > 0) act.amount = d.amount
+    if ((d.kind === 'lock' || d.kind === 'unlock') && cfg.type === 'access') errors.push('A door has no timed lock: the guest\'s key decides.')
+    rules.push({ when: { kind: w.kind, value }, do: act })
+  }
+  if (errors.length) throw new Error(errors.join(' '))
+  const clean = { id, name, icon: String(cfg.icon || '🧩').slice(0, 8), type: cfg.type, price: cfg.price, unit: String(cfg.unit || 'use').slice(0, 12), commands, rules, version: Number.isInteger(cfg.version) && cfg.version > 0 ? cfg.version : 1 }
+  if (cfg.type === 'rent' && Number.isInteger(cfg.maxHours) && cfg.maxHours > 0) clean.maxHours = Math.min(cfg.maxHours, 24)
+  return clean
+}
+
+// What changed between two configs, in words the host reads before pressing Apply.
+export function diffDevices (a, b) {
+  const out = []
+  for (const k of ['name', 'icon', 'type', 'price', 'unit']) if (a[k] !== b[k]) out.push({ field: k, from: a[k], to: b[k] })
+  const ra = (a.rules || []).map(ruleText); const rb = (b.rules || []).map(ruleText)
+  for (const r of rb) if (!ra.includes(r)) out.push({ field: 'rule', to: r })
+  for (const r of ra) if (!rb.includes(r)) out.push({ field: 'rule', from: r })
+  return out
+}
+
+export class DeviceLayer {
+  constructor (hub, { dollarId = process.env.DOLLAR_ASSET, useMs = Number(process.env.USE_MS || 45_000), hourMs = Number(process.env.HOUR_MS || 60_000) } = {}) {
+    this.hub = hub
+    this.dollarId = dollarId || null
+    this.useMs = useMs
+    this.hourMs = hourMs
+    this.dir = path.join(hub.wallet.dir, 'devices')
+    this.stateFile = path.join(hub.wallet.dir, 'devices-state.json')
+    fs.mkdirSync(this.dir, { recursive: true })
+    this.state = fs.existsSync(this.stateFile) ? JSON.parse(fs.readFileSync(this.stateFile, 'utf8')) : { devices: {}, notices: [], clockHour: null }
+    if (process.env.DEMO_DEVICES === '1' && !this.list().length) for (const d of DEMO) this.write(d)
+    // A payment for a device settled: the device starts, its counters move, its rules may fire.
+    hub.on('paid', (p) => { try { this.onPaid(p) } catch (e) { console.error('devices:', e.message) } })
+  }
+
+  // ---------- storage ----------
+  file (id, version) { return path.join(this.dir, version ? `${id}.v${version}.json` : `${id}.json`) }
+  list () {
+    return fs.readdirSync(this.dir).filter((f) => /^[a-z0-9-]+\.json$/.test(f))
+      .map((f) => JSON.parse(fs.readFileSync(path.join(this.dir, f), 'utf8'))).sort((a, b) => a.id.localeCompare(b.id))
+  }
+  get (id) {
+    if (!ID_RE.test(String(id)) || !fs.existsSync(this.file(id))) throw new Error('Unknown device.')
+    return JSON.parse(fs.readFileSync(this.file(id), 'utf8'))
+  }
+  write (cfg) { fs.writeFileSync(this.file(cfg.id), JSON.stringify({ ...cfg, updatedAt: new Date().toISOString() }, null, 1)) }
+  saveState () { fs.writeFileSync(this.stateFile, JSON.stringify(this.state, null, 1)) }
+  rt (id) { return (this.state.devices[id] ||= { status: 'idle', until: 0, earned: 0, uses: 0, lastTriggered: {} }) }
+
+  add (config) {
+    const cfg = validateDevice({ ...config, version: 1 })
+    if (fs.existsSync(this.file(cfg.id))) throw new Error(`A device with id "${cfg.id}" already exists.`)
+    this.write(cfg)
+    return this.get(cfg.id)
+  }
+  apply (id, config) {
+    const current = this.get(id)
+    const cfg = validateDevice({ ...config, version: current.version + 1 }, { current })
+    fs.writeFileSync(this.file(id, current.version), JSON.stringify(current, null, 1)) // keep the previous version
+    this.write(cfg)
+    return this.get(id)
+  }
+  rollback (id, version) {
+    const current = this.get(id)
+    if (!Number.isInteger(version) || !fs.existsSync(this.file(id, version))) throw new Error('Unknown version.')
+    const old = JSON.parse(fs.readFileSync(this.file(id, version), 'utf8'))
+    return this.apply(id, old) // the rollback is a new version: nothing is lost
+  }
+  remove (id) { this.get(id); fs.unlinkSync(this.file(id)); delete this.state.devices[id]; this.saveState(); return { ok: true } }
+
+  // ---------- state and rules (time and price rules; the counter rules fire in onPaid) ----------
+  hour () { return Number.isInteger(this.state.clockHour) ? this.state.clockHour : new Date().getHours() }
+  // Locked by the "after_hour" rules: the most recent lock/unlock event of the day (wrapping past midnight) wins.
+  lockedByRules (cfg) {
+    const ev = (cfg.rules || []).filter((r) => r.when.kind === 'after_hour' && (r.do.kind === 'lock' || r.do.kind === 'unlock'))
+      .map((r) => ({ h: r.when.value, lock: r.do.kind === 'lock' })).sort((a, b) => a.h - b.h)
+    if (!ev.length) return false
+    const h = this.hour()
+    if (!ev.some((e) => !e.lock)) return ev.some((e) => h >= e.h) // only "lock after H": locked until midnight
+    const last = [...ev].reverse().find((e) => e.h <= h) || ev[ev.length - 1]
+    return last.lock
+  }
+  // Price now: the base price, or the price of a "weekday → set_price" rule for today. Computed here, never by the AI.
+  effectivePrice (cfg) {
+    const day = DAYS[new Date().getDay()]
+    const r = (cfg.rules || []).filter((x) => x.when.kind === 'weekday' && x.do.kind === 'set_price' && x.when.value.includes(day)).pop()
+    return r ? r.do.price : cfg.price
+  }
+  status (cfg) {
+    const rt = this.rt(cfg.id)
+    if (rt.until > Date.now()) return { status: 'running', until: rt.until }
+    if (this.lockedByRules(cfg)) return { status: 'locked' }
+    return { status: 'idle' }
+  }
+  view (cfg) { const rt = this.rt(cfg.id); return { ...cfg, price: this.effectivePrice(cfg), basePrice: cfg.price, state: this.status(cfg), earned: rt.earned, uses: rt.uses, lastTriggered: rt.lastTriggered } }
+  notice (deviceId, text, kind) {
+    this.state.notices.unshift({ at: Date.now(), deviceId, kind, text })
+    this.state.notices = this.state.notices.slice(0, 100)
+  }
+
+  onPaid (p) {
+    const id = p.meta?.serviceId
+    if (!id || !fs.existsSync(this.file(id))) return
+    const cfg = this.get(id)
+    const rt = this.rt(id)
+    const runFor = cfg.type === 'rent' ? (p.meta.hours || 1) * this.hourMs : this.useMs
+    rt.until = Date.now() + runFor
+    rt.status = 'running'
+    rt.earned += p.amount
+    rt.uses += 1
+    // counter rules: "every 50 uses → propose maintenance / notify the host"
+    cfg.rules.forEach((r, i) => {
+      if (r.when.kind !== 'counter_at' || rt.uses % r.when.value !== 0) return
+      rt.lastTriggered[i] = Date.now()
+      if (r.do.kind === 'propose_purchase') this.notice(id, `${cfg.name}: ${rt.uses} uses, ${r.do.reason} proposed.`, 'propose_purchase')
+      if (r.do.kind === 'notify') this.notice(id, `${cfg.name}: ${r.do.text}`, 'notify')
+    })
+    this.hub.trace?.append('device.start', p.id, { deviceId: id, until: rt.until })
+    this.saveState()
+    console.log(`[device ${id}] running until ${new Date(rt.until).toLocaleTimeString()} (payment ${p.id})`)
+  }
+
+  // ---------- public: a guest orders a device; the price comes from the device config, never from the request ----------
+  async order (id, { hours } = {}) {
+    const cfg = this.get(id)
+    if (!this.dollarId) throw new Error('This hub has no dollar asset configured (DOLLAR_ASSET).')
+    if (cfg.type === 'access') throw new Error('A door is opened with your key, not paid.')
+    const st = this.status(cfg)
+    if (st.status === 'running') throw new Error(`${cfg.name} is busy. Try again in a moment.`)
+    if (st.status === 'locked') throw new Error(`${cfg.name} is locked by the owner's rules right now.`)
+    const h = cfg.type === 'rent' ? Math.min(Math.max(1, Math.round(Number(hours) || 1)), cfg.maxHours || 24) : 1
+    const amount = this.effectivePrice(cfg) * h
+    const p = await this.hub.requestPayment({
+      assetId: this.dollarId, amount,
+      description: cfg.type === 'rent' ? `${cfg.name}, ${h} h` : `${cfg.name}, 1 ${cfg.unit}`,
+      meta: { serviceId: cfg.id, hours: h }
+    })
+    return { id: p.id, serviceId: cfg.id, assetId: p.assetId, amount: p.amount, hours: h, invoice: p.invoice, recipientId: p.recipientId, status: p.status }
+  }
+
+  publicService (cfg) {
+    const v = this.view(cfg)
+    return { id: v.id, name: v.name, icon: v.icon, type: v.type, price: v.price, unit: v.unit, maxHours: v.maxHours, rules: v.rules, state: v.state }
+  }
+
+  // ---------- HTTP ----------
+  router () {
+    const r = express.Router()
+    const owner = (req, res, next) => this.hub.isOwner(req) ? next() : res.status(401).json({ error: 'Owner key required (X-Hub-Key).' })
+    const wrap = (fn) => (req, res) => Promise.resolve().then(() => fn(req)).then((x) => res.json(x)).catch((e) => res.status(400).json({ error: String(e.message || e) }))
+
+    // owner
+    r.get('/devices', owner, wrap(() => this.list().map((d) => this.view(d))))
+    r.get('/devices/notices', owner, wrap(() => this.state.notices))
+    r.post('/devices/clock', owner, wrap((req) => {
+      const h = req.body?.hour
+      this.state.clockHour = Number.isInteger(h) && h >= 0 && h <= 23 ? h : null
+      this.saveState()
+      return { hour: this.hour(), simulated: this.state.clockHour !== null }
+    }))
+    r.post('/devices/chat', owner, wrap((req) => chatDevice(req.body?.messages, { existingIds: this.list().map((d) => d.id) })))
+    r.post('/devices', owner, wrap((req) => this.add(req.body?.config)))
+    r.post('/devices/:id/edit', owner, wrap(async (req) => {
+      const current = this.get(req.params.id)
+      const proposed = validateDevice(await editDevice(req.body?.text, current), { current })
+      return { proposed, diff: diffDevices(current, proposed) }
+    }))
+    r.post('/devices/:id/apply', owner, wrap((req) => this.apply(req.params.id, req.body?.config)))
+    r.post('/devices/:id/rollback', owner, wrap((req) => this.rollback(req.params.id, Number(req.body?.version))))
+    r.delete('/devices/:id', owner, wrap((req) => this.remove(req.params.id)))
+
+    // public
+    r.get('/services', wrap(() => ({ name: this.hub.name, dollar: 'HUSD', dollarId: this.dollarId, services: this.list().map((d) => this.publicService(d)) })))
+    r.post('/services/:id/order', wrap((req) => this.order(req.params.id, req.body || {})))
+    r.get('/orders/:id', wrap((req) => {
+      const p = this.hub.getPayment(req.params.id)
+      const id = p.meta?.serviceId
+      const cfg = id && fs.existsSync(this.file(id)) ? this.get(id) : null
+      return { ...this.hub.publicPayment(p), serviceId: id, service: cfg ? this.publicService(cfg) : null }
+    }))
+    return r
+  }
+}
+
+export const createDeviceLayer = (hub, opts) => new DeviceLayer(hub, opts)
