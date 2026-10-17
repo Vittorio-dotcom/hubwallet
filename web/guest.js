@@ -4,7 +4,7 @@
 // - Hubs: public API (/api/services, /api/services/:id/order, /api/payments/:id). A hub is added only after the guest
 //   confirms it (search field or QR link), and can be used from a distance.
 // - If no hub answers, example devices are shown, marked "Example data".
-import { el, fill, money, DOLLAR, icon, porthole, statusOf, clock } from './ui.js'
+import { el, fill, money, DOLLAR, icon, porthole, statusOf, clock, themeButton, lens } from './ui.js'
 
 const $ = (s) => document.querySelector(s)
 const EXAMPLE_WALLET = 'example:wallet'
@@ -128,6 +128,7 @@ function render () {
   fill(car, cards)
   car.scrollLeft = keep
   fill($('#dots'), cards.map((_, i) => el('span', { class: i === active ? 'on' : '' })))
+  lens([...car.querySelectorAll('.pass:not(.add)')])
 
   // machines of the connected hubs, filtered by the search text
   const q = query.toLowerCase()
@@ -383,6 +384,8 @@ function confirmPay (c, h) {
 // static icons in the markup
 fill($('#brand-mark'), icon('hub', { size: 16 }))
 fill($('#open-user'), icon('user', { size: 20 }))
+$('#open-user').before(themeButton())
+lens($('.topbar'))
 fill($('#search-ico'), icon('search', { size: 18 }))
 fill($('#privacy-ico'), icon('info', { size: 18 }))
 document.querySelectorAll('[data-close]').forEach((b) => fill(b, icon('close', { size: 18 })))
