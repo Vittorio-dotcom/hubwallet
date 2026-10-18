@@ -143,7 +143,16 @@ export class Wallet {
   // Downloads incoming consignments, sends ACKs, updates confirmations.
   refresh () { return this.run(async (a) => { try { await a.refreshWallet() } catch (e) { return String(e.message || e) } }) }
 
-  transfers (assetId) { return this.run(async (a) => plain(await a.listTransfers(assetId))) }
+  // Without assetId rgb-lib lists only transfers with no asset (none): ask asset by asset.
+  transfers (assetId) {
+    return this.run(async (a) => {
+      if (assetId) return plain(await a.listTransfers(assetId))
+      const ids = Object.values(plain(await a.listAssets()) || {}).flat().map((x) => x.assetId).filter(Boolean)
+      const all = []
+      for (const id of ids) all.push(...plain(await a.listTransfers(id)).map((t) => ({ assetId: id, ...t })))
+      return all.sort((x, y) => (x.createdAt || 0) - (y.createdAt || 0))
+    })
+  }
 
   // Reads an RGB invoice WITHOUT paying it: { recipientId, assetId?, assignment, network,
   // expirationTimestamp, transportEndpoints }. The payer uses it to check that the invoice
