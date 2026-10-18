@@ -363,7 +363,7 @@ async function pay (h, s) {
   try {
     if (demoHubs || current().url === EXAMPLE_WALLET) { // example mode: show the steps, move nothing
       for (let i = 0; i <= 3; i++) { track(i, 'Example data: nothing is really paid.'); await new Promise((r) => setTimeout(r, 900)) }
-      track(4, `${s.name} started`, 'ok'); return
+      track(3, `Example only: nothing was paid and the ${s.name.toLowerCase()} did not start. Swipe to your real wallet (not "Example") to pay.`, 'warn'); return
     }
     track(0, 'Asking the machine for its price…')
     const order = await api(`${h.url}/api/services/${encodeURIComponent(s.id)}/order`, s.type === 'rent' ? { hours } : {})
