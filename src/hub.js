@@ -35,6 +35,7 @@ app.use(express.json({ limit: '1mb' })) // PSBTs are a few KB
 app.use((req, res, next) => { // pages may be served by another machine (client app, device pages)
   res.set('Access-Control-Allow-Origin', '*')
   res.set('Access-Control-Allow-Headers', 'Content-Type, X-Hub-Key')
+  res.set('Access-Control-Allow-Methods', 'GET, POST, DELETE, OPTIONS') // DELETE (remove a machine) needs it cross-origin
   if (req.method === 'OPTIONS') return res.sendStatus(204)
   next()
 })
