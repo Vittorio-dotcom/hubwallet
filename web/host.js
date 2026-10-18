@@ -178,7 +178,7 @@ function proposal (cur, next, diffList, onApply) {
 let current = null
 function openDevice (d, from) {
   current = d; $('#device-title').textContent = d.name; $('#edit-text').value = ''; fill($('#edit-out'))
-  editChat = [{ role: 'ai', text: `What do you want to change on the ${d.name.toLowerCase()}?` }]; pendingEdit = []
+  editChat = [{ role: 'ai', text: `What do you want to change on the ${d.name.toLowerCase()}?` }]; pendingEdit = []; editProposal = null
   drawEditChat(); renderDevice(); show('device', from)
 }
 function renderDevice () {
@@ -233,6 +233,7 @@ async function setClock (v) {
 // Edit as a conversation. The hub's AI takes all the host's requests since the last apply (POST /api/devices/:id/edit
 // { text }); when something is missing it answers { reply } ("How much?") and the next message completes it.
 let editChat = []; let pendingEdit = []
+let editProposal = null // the proposal on screen: the next request changes it, so changes add up
 const bubbles = (list) => list.map((m) => el('div', { class: `msg ${m.role === 'ai' ? 'ai' : 'me'}${m.text === '…' ? ' typing' : ''}` }, m.text))
 function drawEditChat () { fill($('#edit-chat'), bubbles(editChat)); $('#edit-chat').scrollTop = $('#edit-chat').scrollHeight }
 function followUp (text) { // what to ask when an older hub could not tell what to change
@@ -253,13 +254,14 @@ $('#edit-form').addEventListener('submit', async (e) => {
   editChat.push({ role: 'ai', text: '…' }); drawEditChat()
   const h = hub()
   try {
-    const r = await call(`${h.url}/api/devices/${encodeURIComponent(current.id)}/edit`, { key: h.key, body: { text: request, messages: editChat.slice(0, -1) } })
+    const r = await call(`${h.url}/api/devices/${encodeURIComponent(current.id)}/edit`, { key: h.key, body: { text: request, messages: editChat.slice(0, -1), base: editProposal || undefined } })
     if (r.reply && !r.proposed) { editChat[editChat.length - 1] = { role: 'ai', text: r.reply }; drawEditChat(); return } // the AI asks something
-    pendingEdit = []
+    pendingEdit = []; editProposal = r.proposed
     editChat[editChat.length - 1] = { role: 'ai', text: (r.diff || []).length ? 'Here is what would change. Apply it, or tell me what to adjust.' : 'Nothing would change.' }; drawEditChat()
     fill($('#edit-out'), proposal(current, r.proposed, r.diff || [], async () => {
       try {
         const saved = await call(`${h.url}/api/devices/${encodeURIComponent(current.id)}/apply`, { key: h.key, body: { config: r.proposed } })
+        editProposal = null
         await refresh(); current = hub().devices.find((x) => x.id === saved.id) || current
         fill($('#edit-out'), notice('ok', `Saved as version ${saved.version}.`)); renderDevice()
         editChat.push({ role: 'ai', text: `Saved as version ${saved.version}. Anything else?` }); drawEditChat()
@@ -275,9 +277,11 @@ $('#edit-form').addEventListener('submit', async (e) => {
 
 // ---------- add a machine: guided chat with the hub's AI ----------
 let messages = []
+let addProposal = null; let pendingAdd = [] // once a proposal is on screen, the host's messages change it
 function drawChat () { fill($('#dev-chat'), bubbles(messages)); $('#dev-chat').scrollTop = $('#dev-chat').scrollHeight }
 $('#add-device').onclick = () => {
   messages = [{ role: 'ai', text: 'Which machine do you want to connect? For example “a dryer, 2 dollars per cycle”. You can also paste its descriptor.' }]
+  addProposal = null; pendingAdd = []
   fill($('#add-dev-out')); $('#dev-chat-text').value = ''
   drawChat(); show('add-dev'); $('#dev-chat-text').focus()
 }
@@ -290,9 +294,12 @@ $('#dev-chat-form').addEventListener('submit', async (e) => {
   messages.push({ role: 'ai', text: '…' }); drawChat()
   try {
     const h = hub()
-    const r = await call(h.url + '/api/devices/chat', { key: h.key, body: { messages: messages.slice(0, -1) } })
+    if (addProposal) pendingAdd.push(text)
+    const body = addProposal ? { base: addProposal, text: pendingAdd.join('. ') } : { messages: messages.slice(0, -1) }
+    const r = await call(h.url + '/api/devices/chat', { key: h.key, body })
     messages[messages.length - 1] = { role: 'ai', text: r.reply || 'Here is my proposal.' }; drawChat()
     if (r.proposed) {
+      addProposal = r.proposed; pendingAdd = []
       fill($('#add-dev-out'), proposal(null, r.proposed, [], async () => {
         try { await call(h.url + '/api/devices', { key: h.key, body: { config: r.proposed } }); show(null); await refresh() } catch (err) { $('#add-dev-out').append(notice('bad', err.message)) }
       }))
