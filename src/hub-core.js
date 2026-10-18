@@ -105,13 +105,17 @@ export class Hub extends EventEmitter {
 
   // Indexer sync: bitcoin balance and UTXOs. Blocking (10–25 s), so only at quiet moments.
   // At most one at a time and one per minute (manual refreshes may come in a row).
-  async syncWallet () {
-    if (this.syncing || Date.now() - (this.lastSync || 0) < 60_000) return
-    this.syncing = true
-    try {
-      const err = await this.wallet.sync()
-      if (err) console.error('sync:', err)
-    } finally { this.syncing = false; this.lastSync = Date.now(); this.walletCache = null }
+  // force: before preparing a spend, rgb-lib must see our real UTXOs (it picks inputs and change from its local view).
+  syncWallet ({ force = false } = {}) {
+    if (this.syncing) return this.syncing
+    if (!force && Date.now() - (this.lastSync || 0) < 60_000) return Promise.resolve()
+    this.syncing = (async () => {
+      try {
+        const err = await this.wallet.sync()
+        if (err) console.error('sync:', err)
+      } finally { this.syncing = null; this.lastSync = Date.now(); this.walletCache = null }
+    })()
+    return this.syncing
   }
 
   // Is there anything the watcher must look at?
@@ -373,6 +377,7 @@ export class Hub extends EventEmitter {
     if (asked && asked !== amount) throw new Error(`The invoice asks for ${asked}, not ${amount}.`)
     if (inv.expirationTimestamp && inv.expirationTimestamp * 1000 < Date.now()) throw new Error('The invoice has expired.')
 
+    await this.syncWallet({ force: true })
     const { psbt, batchTransferIdx } = await this.wallet.prepareSend({ assetId, amount, invoice })
     return this.addToSign({ kind: 'send', description, assetId, amount, invoice, recipientId: inv.recipientId, psbt, batchTransferIdx })
   }
@@ -382,6 +387,7 @@ export class Hub extends EventEmitter {
     const busy = this.pendingItem()
     if (busy) throw new Error(`Another operation is waiting for the signature (${busy.id}). Sign or reject it first.`)
     num = Math.min(Math.max(1, Math.round(Number(num) || 5)), 20)
+    await this.syncWallet({ force: true })
     const { psbt } = await this.wallet.prepareUtxos({ num })
     return this.addToSign({ kind: 'utxos', description: `Create up to ${num} colorable UTXOs`, psbt })
   }

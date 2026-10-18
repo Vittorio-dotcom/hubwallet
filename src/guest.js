@@ -48,15 +48,33 @@ async function refreshNow () {
 }
 // At most one sync at a time and one per minute: pages may ask /api/refresh every few seconds,
 // and each sync freezes this server for 10–50 s (more when the indexer is slow).
-let syncing = false
+// force: skip the one-per-minute limit (a send just failed on an old view of our UTXOs).
+let syncing = null // the running sync, so callers can wait for it
 let lastSync = 0
-async function syncNow () {
-  if (syncing || Date.now() - lastSync < 60_000) return
-  syncing = true
-  try {
-    const err = await wallet.sync()
-    if (err) console.error('sync:', err)
-  } finally { syncing = false; lastSync = Date.now(); balanceCache = null }
+function syncNow ({ force = false } = {}) {
+  if (syncing) return syncing
+  if (!force && Date.now() - lastSync < 60_000) return Promise.resolve()
+  syncing = (async () => {
+    try {
+      const err = await wallet.sync()
+      if (err) console.error('sync:', err)
+    } finally { syncing = null; lastSync = Date.now(); balanceCache = null }
+  })()
+  return syncing
+}
+
+// rgb-lib picks inputs and change from its local view of our UTXOs, which is only as fresh as the
+// last sync (we no longer sync on every balance read). If it finds no room or no bitcoin, that view
+// may just be old: sync once and try again. "Dollars still settling" also gets a refresh first.
+const STALE = /InsufficientAllocationSlots|InsufficientBitcoins|InsufficientAssignments/
+async function sendFresh (args) {
+  try { return await wallet.send(args) } catch (e) {
+    if (!STALE.test(String(e.message || e))) throw e
+    console.log(`[send] ${String(e.message || e)}: sync and retry once`)
+    await refreshNow()
+    await syncNow({ force: true })
+    return wallet.send(args)
+  }
 }
 function burst (reason) {
   for (const d of [10_000, 35_000, 70_000, 120_000]) setTimeout(() => refreshNow(), d)
@@ -153,7 +171,7 @@ app.post('/api/pay-request', wrap(async (req) => {
   const { hubUrl, paymentId, expect, anonymous = false } = req.body || {}
   if (!expect) throw new Error('expect { assetId, amount } is required: pass what the user confirmed.')
   const c = await check(hubUrl, paymentId, expect)
-  const sent = await wallet.send({ assetId: c.assetId, amount: c.amount, invoice: c.invoice }) // WDK signs here
+  const sent = await sendFresh({ assetId: c.assetId, amount: c.amount, invoice: c.invoice }) // WDK signs here
   balanceCache = null // the wallet changed: next /api/me reads it again
   let payerTag = null
   let claimError
@@ -190,7 +208,7 @@ app.post('/api/pay', wrap(async (req) => {
   if (!String(invoice || '').startsWith('rgb:')) throw new Error('invoice must be an RGB invoice (rgb:...).')
   const inv = await wallet.decodeInvoice(invoice)
   if (inv.assetId && inv.assetId !== assetId) throw new Error('The invoice asks for a different asset.')
-  const r = await wallet.send({ invoice, assetId, amount: Number(amount) })
+  const r = await sendFresh({ invoice, assetId, amount: Number(amount) })
   balanceCache = null
   trace.append('pay.sent', inv.recipientId, { assetId, amount: Number(amount), txid: r.txid, description: String(description).slice(0, 200) })
   burst(`paid ${inv.recipientId}`)
