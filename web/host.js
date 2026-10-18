@@ -130,7 +130,7 @@ function render () {
   // machines
   fill($('#devices'), h.devices.map((d) => el('button', { class: 'device-card', type: 'button', on: { click: (e) => openDevice(d, e.currentTarget) }, 'aria-label': `${d.name}, ${stateText(d)}` },
       el('div', { class: 'row', style: 'align-items:flex-start' }, porthole(d, { size: 64 }), el('span', { class: 'grow' }), el('span', { class: `badge ${statusOf(d).key}` }, stateText(d))),
-      el('div', { class: 'stack', style: 'gap:2px' }, el('h3', {}, d.name), el('span', { class: 'sub muted' }, `${money(d.price)} ${DOLLAR} per ${d.unit}`)),
+      el('div', { class: 'stack', style: 'gap:2px' }, el('h3', {}, d.name), el('span', { class: 'sub muted' }, priceLine(d))),
       el('div', { class: 'meta footnote' }, el('span', {}, `${(d.rules || []).length} rule${(d.rules || []).length === 1 ? '' : 's'}`), el('span', { class: 'num' }, `${money(d.earned || 0)} earned`)))),
     el('button', { class: 'device-card add', type: 'button', on: { click: () => $('#add-device').click() } }, icon('plus', { size: 28 }), 'Add a machine'))
 }
@@ -168,7 +168,7 @@ function proposal (cur, next, diffList, onApply) {
     cur ? (rows.length ? el('ul', { class: 'diff' }, rows) : el('p', { class: 'muted' }, 'Nothing would change.'))
       : el('div', { class: 'stack' },
         el('div', { class: 'row' }, porthole({ ...next, state: { status: 'idle' } }, { size: 56 }),
-          el('div', { class: 'grow' }, el('h3', {}, next.name), el('div', { class: 'sub muted' }, `${money(next.price)} ${DOLLAR} per ${next.unit}`))),
+          el('div', { class: 'grow' }, el('h3', {}, next.name), el('div', { class: 'sub muted' }, priceLine(next)))),
         (next.rules || []).length ? el('div', { class: 'group' }, next.rules.map((r) => el('div', { class: 'cell' }, el('span', { class: 'cell-icon gray' }, icon(ruleIcon(r), { size: 16 })), el('span', { class: 'grow' }, ruleText(r)))))
           : el('p', { class: 'footnote' }, 'No rules.')),
     el('button', { class: 'btn primary block', type: 'button', disabled: cur && !diffList.length, on: { click: onApply } }, cur ? 'Apply' : 'Add machine'))
@@ -181,6 +181,11 @@ function openDevice (d, from) {
   editChat = [{ role: 'ai', text: `What do you want to change on the ${d.name.toLowerCase()}?` }]; pendingEdit = []; editProposal = null
   drawEditChat(); renderDevice(); show('device', from)
 }
+// "1.50 HUSD per coffee", or with options "Espresso 1.50 · Cappuccino 2.00"
+const priceLine = (d) => d.options?.length ? d.options.map((o) => `${o.name} ${money(o.price)}`).join(' · ') : `${money(d.price)} ${DOLLAR} per ${d.unit}`
+const optionsGroup = (d) => d.options?.length
+  ? el('div', { class: 'stack' }, el('h3', {}, 'Options'), el('div', { class: 'group' }, d.options.map((o) => el('div', { class: 'cell' }, el('span', { class: 'grow' }, o.name), el('span', { class: 'num' }, `${money(o.price)} ${DOLLAR}`)))))
+  : null
 function renderDevice () {
   const d = current
   const st = statusOf(d)
@@ -192,11 +197,12 @@ function renderDevice () {
       el('div', { class: 'cell' }, el('span', { class: 'grow muted' }, 'Earned'), el('span', { class: 'num' }, `${money(d.earned || 0)} ${DOLLAR}`)),
       el('div', { class: 'cell' }, el('span', { class: 'grow muted' }, 'Uses'), el('span', { class: 'num' }, String(d.uses ?? 0))),
       el('div', { class: 'cell' }, el('span', { class: 'grow muted' }, 'Version'), el('span', { class: 'num' }, String(d.version)))),
+    optionsGroup(d),
     el('div', { class: 'stack' }, el('h3', {}, 'Rules'),
       (d.rules || []).length
         ? el('div', { class: 'group' }, d.rules.map((r, i) => el('div', { class: 'cell' }, el('span', { class: 'cell-icon gray' }, icon(ruleIcon(r), { size: 16 })), el('span', { class: 'grow' }, ruleText(r)), el('span', { class: 'value' }, `#${i + 1}`))))
         : el('p', { class: 'footnote' }, 'No rules yet. Ask below, for example “lock it after 22:00”.')))
-  fill($('#edit-suggest'), ['Price 3.50', 'Lock it after 22:00', 'Unlock it at 7:00', 'Weekend +10%', 'Maintenance every 50 uses']
+  fill($('#edit-suggest'), ['Price 3.50', 'Options: quick 2.00, normal 3.00', 'Lock it after 22:00', 'Unlock it at 7:00', 'Weekend +10%', 'Maintenance every 50 uses']
     .map((t) => el('button', { type: 'button', on: { click: () => { $('#edit-text').value = t; $('#edit-text').focus() } } }, t)))
   fill($('#device-tools'),
     el('div', { class: 'group' },

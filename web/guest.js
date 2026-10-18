@@ -86,7 +86,12 @@ async function refresh () {
 // ---------- words ----------
 const KIND = { access: 'Access', use: 'Pay per use', rent: 'Rental' }
 const per = (s) => s.type === 'rent' ? 'hour' : (s.unit || 'use')
-const priceText = (s) => s.type === 'access' ? 'Opens with your key' : `${money(s.price)} ${DOLLAR} per ${per(s)}`
+const priceText = (s) => s.type === 'access' ? 'Opens with your key'
+  : s.options?.length ? `From ${money(Math.min(...s.options.map((o) => o.price)))} ${DOLLAR} · ${s.options.map((o) => o.name).join(', ')}`
+    : `${money(s.price)} ${DOLLAR} per ${per(s)}`
+// the option picked on a machine with options (espresso / cappuccino); the first one until the guest picks
+let choice = null
+const optionOf = (s) => s.options?.length ? (s.options.find((o) => o.id === choice) || s.options[0]) : null
 const stateText = (s) => {
   const st = statusOf(s)
   if (s.type === 'access') return st.key === 'busy' ? 'Open' : 'Locked'
@@ -312,7 +317,8 @@ function openDevice (h, s, from) {
 }
 function renderDevice (h, s) {
   const st = statusOf(s)
-  const amount = s.type === 'rent' ? s.price * hours : s.price
+  const opt = optionOf(s)
+  const amount = opt ? opt.price : s.type === 'rent' ? s.price * hours : s.price
   const w = current()
   const canPay = !busy && !!w && canOrder(s) && !pendingFor(h, s)
   fill($('#dev-body'),
@@ -320,7 +326,9 @@ function renderDevice (h, s) {
       el('div', { class: 'stack', style: 'align-items:center;gap:6px' }, badge(s), el('span', { class: 'footnote' }, `${KIND[s.type]} at ${h.name}`))),
     s.type === 'access' ? null : el('div', { class: 'stack', style: 'align-items:center;gap:4px' },
       el('div', { class: 'price-big' }, money(amount), el('small', {}, DOLLAR)),
-      el('span', { class: 'footnote' }, s.type === 'rent' ? `${money(s.price)} per hour` : `for one ${per(s)}`)),
+      el('span', { class: 'footnote' }, opt ? opt.name : s.type === 'rent' ? `${money(s.price)} per hour` : `for one ${per(s)}`)),
+    opt ? el('div', { class: 'seg', role: 'group', 'aria-label': 'Choose' },
+      s.options.map((o) => el('button', { type: 'button', 'aria-pressed': String(o.id === opt.id), on: { click: () => { choice = o.id; renderDevice(h, s) } } }, `${o.name} · ${money(o.price)}`))) : null,
     s.type === 'rent' ? el('div', { class: 'seg', role: 'group', 'aria-label': 'Hours' },
       Array.from({ length: s.maxHours || 4 }, (_, i) => el('button', { type: 'button', 'aria-pressed': String(hours === i + 1), on: { click: () => { hours = i + 1; renderDevice(h, s) } } }, `${i + 1} h`))) : null,
     st.key === 'busy' ? notice('info', `In use right now. Free in ${clock(st.until)}.`) : null,
@@ -373,11 +381,12 @@ async function pay (h, s) {
       track(3, `Example only: nothing was paid and the ${s.name.toLowerCase()} did not start. Swipe to your real wallet (not "Example") to pay.`, 'warn'); return
     }
     track(0, 'Asking the machine for its price…')
-    const order = await api(`${h.url}/api/services/${encodeURIComponent(s.id)}/order`, s.type === 'rent' ? { hours } : {})
+    const opt = optionOf(s)
+    const order = await api(`${h.url}/api/services/${encodeURIComponent(s.id)}/order`, { ...(s.type === 'rent' ? { hours } : {}), ...(opt ? { option: opt.id } : {}) })
     const paymentId = order.id
     // 2. what the wallet itself reads in the hub's invoice
     const c = await walletApi('/api/check', { hubUrl: h.url, paymentId })
-    const shown = s.price * (s.type === 'rent' ? hours : 1)
+    const shown = opt ? opt.price : s.price * (s.type === 'rent' ? hours : 1)
     if (c.amount !== shown || c.assetId !== dollar()?.assetId) throw new Error(`The hub asks for ${money(c.amount)} instead of ${money(shown)} ${DOLLAR}, or for another asset. Nothing was paid.`)
     // 3. explicit confirmation of what the wallet checked
     const ok = await confirmPay(c, h)
