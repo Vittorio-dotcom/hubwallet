@@ -76,7 +76,15 @@ async function sendFresh (args, recheck = async () => {}) {
     await refreshNow()
     await syncNow({ force: true })
     await recheck()
-    return wallet.send(args)
+    try { return await wallet.send(args) } catch (e2) {
+      // really no free UTXO for the change: create some now (one small Bitcoin tx), the guest retries after the block
+      if (!/InsufficientAllocationSlots/.test(String(e2.message || e2))) throw e2
+      const made = await wallet.createUtxos(5).then(() => true, () => false)
+      balanceCache = null
+      throw new Error(made
+        ? 'Your wallet just prepared room for dollars (a small Bitcoin transaction). Nothing was paid: try again in about a minute.'
+        : String(e2.message || e2))
+    }
   }
 }
 function burst (reason) {
