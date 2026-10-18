@@ -5,6 +5,8 @@
 // - porthole(): the device status ring, shaped like a washing-machine door; it fills while the device runs
 // - status/rule helpers shared by the three pages
 
+import { refract } from './refraction.js'
+
 export const money = (cents) => (Number(cents || 0) / 100).toFixed(2)
 export const DOLLAR = 'HUSD'
 
@@ -159,58 +161,7 @@ export function themeButton () {
   return b
 }
 
-// ---------- liquid glass refraction (Chrome / Edge) ----------
-// Technique from kube.io "Liquid Glass in CSS and SVG": a displacement map shaped like the element's rim bends
-// what is behind the glass near its edges (feDisplacementMap used as a backdrop-filter). Other browsers keep the
-// frosted glass of app.css. Filters are cached by size, so re-rendered elements of the same size share one.
-const chromium = typeof navigator !== 'undefined' && /(Chrome|Edg)\//.test(navigator.userAgent) && !/Firefox|FxiOS/.test(navigator.userAgent)
-let defs = null
-const lensCache = new Map()
-function lensFilter (w, h, r, bezel = 22, scale = 46) {
-  const key = `${w}x${h}x${r}`
-  if (lensCache.has(key)) return lensCache.get(key)
-  const c = document.createElement('canvas'); c.width = w; c.height = h
-  const g = c.getContext('2d'); const img = g.createImageData(w, h); const px = img.data
-  const cx = w / 2; const cy = h / 2; const hx = w / 2 - r; const hy = h / 2 - r
-  for (let y = 0; y < h; y++) {
-    for (let x = 0; x < w; x++) {
-      // distance to the rounded-rect rim and the outward normal there
-      const ax = Math.abs(x + 0.5 - cx); const ay = Math.abs(y + 0.5 - cy); const sx = Math.sign(x + 0.5 - cx) || 1; const sy = Math.sign(y + 0.5 - cy) || 1
-      const dx = ax - hx; const dy = ay - hy
-      let dist; let nx = 0; let ny = 0
-      if (dx > 0 && dy > 0) { const l = Math.hypot(dx, dy) || 1; dist = r - l; nx = (dx / l) * sx; ny = (dy / l) * sy } else if (dx > dy) { dist = w / 2 - ax; nx = sx } else { dist = h / 2 - ay; ny = sy }
-      const t = Math.max(0, Math.min(1, 1 - dist / bezel)); const m = t * t // convex bevel: strongest at the rim
-      const i = (y * w + x) * 4
-      px[i] = 128 - nx * m * 127; px[i + 1] = 128 - ny * m * 127; px[i + 2] = 128; px[i + 3] = 255 // sample from inside the glass
-    }
-  }
-  g.putImageData(img, 0, 0)
-  if (!defs) {
-    const svg = document.createElementNS(SVG, 'svg'); svg.setAttribute('width', '0'); svg.setAttribute('height', '0'); svg.setAttribute('aria-hidden', 'true')
-    svg.style.position = 'absolute'; defs = document.createElementNS(SVG, 'defs'); svg.append(defs); document.body.append(svg)
-  }
-  const id = 'lens-' + lensCache.size
-  const f = document.createElementNS(SVG, 'filter')
-  for (const [k, v] of Object.entries({ id, x: 0, y: 0, width: w, height: h, filterUnits: 'userSpaceOnUse', 'color-interpolation-filters': 'sRGB' })) f.setAttribute(k, v)
-  const fi = document.createElementNS(SVG, 'feImage')
-  for (const [k, v] of Object.entries({ href: c.toDataURL(), x: 0, y: 0, width: w, height: h, result: 'map', preserveAspectRatio: 'none' })) fi.setAttribute(k, v)
-  const fd = document.createElementNS(SVG, 'feDisplacementMap')
-  for (const [k, v] of Object.entries({ in: 'SourceGraphic', in2: 'map', scale, xChannelSelector: 'R', yChannelSelector: 'G' })) fd.setAttribute(k, v)
-  f.append(fi, fd); defs.append(f)
-  lensCache.set(key, id)
-  return id
-}
-const observed = new WeakSet()
-const sizer = typeof ResizeObserver !== 'undefined' ? new ResizeObserver((entries) => entries.forEach((e) => applyLens(e.target))) : null
-function applyLens (node) {
-  const w = Math.round(node.offsetWidth); const h = Math.round(node.offsetHeight)
-  if (!w || !h || w * h > 900_000) return
-  const r = Math.min(parseFloat(getComputedStyle(node).borderTopLeftRadius) || 0, h / 2, w / 2)
-  node.style.setProperty('--lens', `url(#${lensFilter(w, h, Math.round(r))})`)
-  node.classList.add('lens')
-}
-// Give these elements real refraction (call again after re-rendering them).
-export function lens (...nodes) {
-  if (!chromium) return
-  for (const n of nodes.flat()) { if (!n) continue; applyLens(n); if (sizer && !observed.has(n)) { sizer.observe(n); observed.add(n) } }
-}
+// ---------- liquid glass refraction ----------
+// The refraction is web/refraction.js (port of LiquidGlassSkill / liquid-glass-js); web/liquid.js applies it to every
+// glass surface automatically. lens() stays for the pages that ask for it explicitly.
+export function lens (...nodes) { refract(...nodes) }

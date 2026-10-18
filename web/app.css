@@ -309,19 +309,8 @@ details.json-box summary { cursor: pointer; color: var(--blue); font-size: 15px;
    LIQUID GLASS LAYER (overrides the solid surfaces above)
    ===================================================================== */
 
-/* the ambient colour field the glass refracts: three soft lights on a quiet base, fixed behind the page */
-body { background: transparent }
-html { background: var(--amb-base) }
-body::before { content: ""; position: fixed; inset: -10vmax; z-index: -1; pointer-events: none;
-  background:
-    radial-gradient(48vmax 44vmax at 8% 12%, var(--amb-1), transparent 70%),
-    radial-gradient(42vmax 42vmax at 96% 38%, var(--amb-2), transparent 70%),
-    radial-gradient(50vmax 40vmax at 40% 100%, var(--amb-3), transparent 72%),
-    radial-gradient(30vmax 26vmax at 70% 62%, var(--amb-4), transparent 70%) }
-@media (prefers-reduced-motion: no-preference) {
-  body::before { animation: drift 28s ease-in-out infinite alternate }
-  @keyframes drift { to { transform: translate3d(3vmax, -2vmax, 0) rotate(6deg) } }
-}
+/* the ambient colour field is the skill's .liquid-glass-backdrop (web/liquid-glass.css) */
+html, body { background: var(--glass-page-bg) }
 
 /* the glass material: translucent fill, blur + saturation, a luminous rim and a top glint */
 .glass, .group, .overview, .device-card, .confirm, .proposal, .screen-pay, .composer, .sign-banner,
@@ -531,3 +520,51 @@ body::before { content: ""; position: fixed; inset: -10vmax; z-index: -1; pointe
   #search-form .btn { flex: none }
   .sheet-panel { max-height: 92dvh; overflow-y: auto; padding-bottom: max(20px, env(safe-area-inset-bottom)) }
 }
+
+
+/* =====================================================================
+   LIQUID GLASS — recipe of LiquidGlassSkill (web/liquid-glass.css + web/refraction.js)
+   1. the backdrop is the skill's mesh (body.liquid-glass-backdrop)
+   2. the glass is colourless: white→grey at 6 %, the colour comes from behind
+   3. children of a glass panel paint no surface of their own
+   4. refraction (Chromium) replaces the blur; elsewhere blur(3px) saturate(125%)
+   ===================================================================== */
+.group, .overview, .device-card, .confirm, .proposal, .screen-pay, .sign-banner, .pass, .topbar, .tabbar, .composer, .icon-btn, .seg {
+  background-color: transparent;
+  background-image: radial-gradient(220px circle at var(--mx, 30%) var(--my, -40%), var(--spec), transparent 62%),
+    linear-gradient(180deg, var(--glass-tint-top), var(--glass-tint-bottom));
+  border: 1px solid var(--glass-border);
+  box-shadow: var(--glass-shadow), inset 0 1px 0 var(--glass-rim-top), inset 0 0 0 1px var(--glass-rim-hairline), inset 0 -1px 0 var(--glass-rim-bottom);
+  -webkit-backdrop-filter: blur(3px) saturate(125%); backdrop-filter: blur(3px) saturate(125%) }
+.pass.add, .pass.off, .device-card.add { border-style: solid }
+/* floating bars keep a little more frost so their labels read over any content scrolling below */
+.topbar, .tabbar { background-image: radial-gradient(220px circle at var(--mx, 30%) var(--my, -40%), var(--spec), transparent 62%),
+    linear-gradient(180deg, var(--glass-tint-top-hover), var(--glass-tint-bottom-hover)) }
+/* modal tier: a frost layer over the tint so text stays readable over the scrim */
+.sheet { background: var(--glass-scrim); -webkit-backdrop-filter: blur(2px); backdrop-filter: blur(2px) }
+.sheet-panel { background: linear-gradient(180deg, var(--glass-modal-tint), var(--glass-modal-tint)), linear-gradient(180deg, var(--glass-tint-top), var(--glass-tint-bottom));
+  background-color: transparent; border: 1px solid var(--glass-border);
+  box-shadow: var(--glass-shadow), inset 0 1px 0 var(--glass-rim-top), inset 0 0 0 1px var(--glass-rim-hairline);
+  -webkit-backdrop-filter: blur(3px) saturate(125%); backdrop-filter: blur(3px) saturate(125%) }
+/* chip tier (small, repeated: CSS only) */
+.badge, .example-tag, .suggest button, .hub-switch button, .field, .chat .msg.ai {
+  border: 1px solid var(--glass-border); box-shadow: inset 0 1px 0 var(--glass-rim-top);
+  -webkit-backdrop-filter: blur(6px) saturate(125%); backdrop-filter: blur(6px) saturate(125%) }
+.field, .chat .msg.ai { background: linear-gradient(180deg, var(--glass-tint-top-hover), var(--glass-tint-bottom-hover)) }
+/* rule 3: what sits inside a glass panel is transparent, separated by spacing and hairlines */
+.group .cell, .sheet-panel .group, .proposal .group, .confirm .group { background: transparent }
+.sheet-panel .group, .proposal .group { box-shadow: none; border-color: var(--glass-border) }
+.porthole .art { background: linear-gradient(180deg, var(--glass-tint-top-hover), var(--glass-tint-bottom-hover)); box-shadow: inset 0 1px 0 var(--glass-rim-top), inset 0 0 0 1px var(--glass-rim-hairline) }
+/* glass droplets of the tab bar and segmented control */
+.tab-thumb, .seg-thumb { background: linear-gradient(180deg, var(--glass-tint-top-hover), var(--glass-tint-bottom-hover));
+  box-shadow: inset 0 1px 0 var(--glass-rim-top), inset 0 0 0 1px var(--glass-rim-hairline), 0 4px 14px rgba(0,0,0,.12) }
+/* the sheen on the pass is light, not paint: keep it faint */
+.pass::after { opacity: .25 }
+/* text on clear glass: the page colour of the skill */
+body { color: var(--glass-page-fg) }
+
+/* floating bars sit over content that scrolls under them: a frost layer keeps their labels readable (skill: "menu" idea) */
+.topbar, .tabbar { background-image: radial-gradient(220px circle at var(--mx, 30%) var(--my, -40%), var(--spec), transparent 62%),
+    linear-gradient(180deg, var(--glass-modal-tint), var(--glass-modal-tint)), linear-gradient(180deg, var(--glass-tint-top), var(--glass-tint-bottom)) }
+/* light theme: a slightly stronger mesh so clear glass has colour to show (dark keeps the skill's values) */
+:root { --glass-mesh-violet: rgba(139, 92, 246, .3); --glass-mesh-pink: rgba(236, 72, 153, .24); --glass-mesh-cyan: rgba(6, 182, 212, .24); --glass-mesh-corner-top: rgba(79, 70, 229, .12) }
