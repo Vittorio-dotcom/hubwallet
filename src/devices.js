@@ -98,7 +98,7 @@ export function validateDevice (cfg, { current } = {}) {
 //   "add cappuccino 2 euro" · "aggiungi lavaggio 60° 3,50 90 min"   add or replace one
 //   "remove cappuccino" · "togli l'opzione cappuccino" · "no options"
 // Each item: <name> <price> [<n> min] [<from>-<to>]. Returns null when the text is about something else.
-const ITEM = /^(.+?)\s+(\d+(?:[.,]\d{1,2})?)\s*(?:€|eur|euro|\$|dollars?|husd)?(?:\s+(\d{1,3})\s*(?:min|minutes?|minuti|')\.?)?(?:\s+(?:dalle\s+|from\s+)?(\d{1,2})(?:[:.]00)?\s*(?:-|–|alle|to)\s*(\d{1,2})(?:[:.]00)?)?$/i
+const ITEM = /^(.+?)\s+(?:(?:a|at|for|per|=|:)\s+)?(\d+(?:[.,]\d{1,2})?)\s*(?:€|eur|euro|\$|dollars?|husd)?(?:\s+(?:(?:da|for|per|in)\s+)?(\d{1,3})\s*(?:min|minutes?|minuti|')\.?)?(?:\s+(?:dalle\s+|from\s+)?(\d{1,2})(?:[:.]00)?\s*(?:-|–|alle|to)\s*(\d{1,2})(?:[:.]00)?)?$/i
 function parseItem (t) {
   const m = String(t).trim().replace(/^(?:un[oa']?|a|an|the|il|lo|la|l')\s+/i, '').match(ITEM)
   if (!m) return null
@@ -116,7 +116,7 @@ export function optionChange (text, current = []) {
     const items = list[1].split(/[;\n]+|,(?!\d)/).map(parseItem)
     return items.length && items.every(Boolean) ? items : null
   }
-  const add = t.match(/^(?:add|aggiungi|metti|inserisci)\s+(?:(?:an?|the|un[oa']?|il|lo|la|l')\s*)?(?:option|opzione|servizio|service)?\s*:?\s*(.+)$/i)
+  const add = t.match(/^(?:add|aggiungi|metti|inserisci)\s+(?:(?:an?|the|un[oa]?|il|lo|la)\s+|(?:un'|l')\s*)?(?:option|opzione|servizio|service)?\s*:?\s*(.+)$/i)
   // "add a rule: lock after 22" is for the AI, not an option (unless the host says option/servizio)
   if (add && !/\b(option|opzione|servizio|service)\b/i.test(t) && /(rul|regol|lock|blocc|unlock|sblocc|after|dopo|prima|before|mainten|manutenz|%|price|prezzo|weekend|notify|avvisa)/i.test(t)) return null
   if (add) {
@@ -125,7 +125,7 @@ export function optionChange (text, current = []) {
     const keep = (current || []).filter((o) => !items.some((n) => nameKey(n.name) === nameKey(o.name)))
     return [...keep, ...items]
   }
-  const del = t.match(/^(?:remove|delete|togli|rimuovi|elimina)\s+(?:(?:the|l'|il|la|lo)\s*)?(?:option|opzione|servizio|service)?\s*:?\s*(.+)$/i)
+  const del = t.match(/^(?:remove|delete|togli|rimuovi|elimina)\s+(?:(?:the|il|la|lo)\s+|l'\s*)?(?:option|opzione|servizio|service)?\s*:?\s*(.+)$/i)
   if (del && current?.some((o) => nameKey(o.name) === nameKey(del[1]))) return current.filter((o) => nameKey(o.name) !== nameKey(del[1]))
   return null
 }
@@ -317,6 +317,14 @@ export class DeviceLayer {
         let opts = null
         for (const m of (req.body?.messages || []).filter((x) => x?.role === 'host')) opts = optionChange(m.text, opts || []) || opts
         if (opts?.length) out.proposed = validateDevice({ ...out.proposed, options: opts })
+        // "a coffee machine with espresso 1.20 and cappuccino 2": the chat prompt knows no options, the edit one does
+        const all = (req.body?.messages || []).filter((x) => x?.role === 'host').map((x) => x.text).join('. ')
+        if (!opts?.length && (all.match(/\d+(?:[.,]\d+)?/g) || []).length >= 2) {
+          try {
+            const e = await editDevice(all, out.proposed)
+            if (e.proposed?.options?.length) out.proposed = validateDevice({ ...out.proposed, options: e.proposed.options })
+          } catch {}
+        }
       }
       return out
     }))

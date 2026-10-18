@@ -292,7 +292,8 @@ export async function editDevice (text, current) {
   const summary = [
     `Device: ${cur.name} (${cur.type}), price ${money(cur.price || 0)} dollars per ${cur.unit || 'use'}.`,
     `Commands: ${(cur.commands || []).join(', ') || 'none'}.`,
-    rules.length ? 'Current rules:\n' + rules.map((r, i) => `${i + 1}. ${ruleText(r)}`).join('\n') : 'Current rules: none.'
+    rules.length ? 'Current rules:\n' + rules.map((r, i) => `${i + 1}. ${ruleText(r)}`).join('\n') : 'Current rules: none.',
+    (cur.options || []).length ? 'Current options: ' + cur.options.map((o) => `${o.name} ${money(o.price)}${o.minutes ? ` ${o.minutes} min` : ''}`).join(', ') + '.' : 'Current options: none.'
   ].join('\n')
   const out = await ask(`${PROMPTS.edit}\n\n${summary}`, text, 'edit', {
     type: 'object',
@@ -303,11 +304,14 @@ export async function editDevice (text, current) {
       removeRules: { type: 'array', items: { type: 'integer' }, maxItems: 10 },
       removeAllRules: { type: 'boolean' },
       addRules: { type: 'array', maxItems: 4, items: ruleSchema() },
-      askedPriceChange: { type: 'boolean' } // the host wants another base price, even without saying how much
+      askedPriceChange: { type: 'boolean' }, // the host wants another base price, even without saying how much
+      // options = small services of the machine (espresso / cappuccino, wash 30° / 60°)
+      addOptions: { type: 'array', maxItems: 6, items: { type: 'object', properties: { name: { type: 'string' }, priceDollars: nullable('number'), minutes: nullable('integer'), fromHour: nullable('integer'), toHour: nullable('integer') }, required: ['name', 'priceDollars', 'minutes', 'fromHour', 'toHour'], additionalProperties: false } },
+      removeOptions: { type: 'array', maxItems: 8, items: { type: 'string' } }
     },
-    required: ['newName', 'newPriceDollars', 'pricePercent', 'removeRules', 'removeAllRules', 'addRules', 'askedPriceChange'],
+    required: ['newName', 'newPriceDollars', 'pricePercent', 'removeRules', 'removeAllRules', 'addRules', 'askedPriceChange', 'addOptions', 'removeOptions'],
     additionalProperties: false
-  }, { maxTokens: 600 })
+  }, { maxTokens: 900 })
 
   const next = structuredClone(cur)
   const name = str(out.newName, 40)
@@ -335,13 +339,28 @@ export async function editDevice (text, current) {
       else next.rules.push(r)
     } catch (e) { ruleProblem = e.message } // e.g. "lock it at night": which hour? → asked below
   }
+  // options: price, minutes and hours are kept only if the host wrote those numbers (money guard)
+  const key = (n) => String(n).toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[^a-z0-9]+/g, '')
+  const dropOpt = new Set((out.removeOptions || []).map(key))
+  let options = (cur.options || []).filter((o) => !dropOpt.has(key(o.name)))
+  const addOpts = (out.addOptions || []).filter((o) => str(o.name, 30))
+  for (const o of addOpts) {
+    if (!written(o.priceDollars, text)) { ruleProblem = `How much is ${str(o.name, 30)}? Write its price (e.g. "${str(o.name, 30)} 2.00").`; continue }
+    const opt = { name: str(o.name, 30), price: cents(o.priceDollars) }
+    if (Number.isInteger(o.minutes) && written(o.minutes, text)) opt.minutes = o.minutes
+    if (Number.isInteger(o.fromHour) && Number.isInteger(o.toHour) && written(o.fromHour, text) && written(o.toHour, text)) { opt.from = o.fromHour; opt.to = o.toHour }
+    options = options.filter((x) => key(x.name) !== key(opt.name)).concat(opt)
+  }
+  // a price written for a new option is that option's price, not the machine's
+  if (addOpts.length && addOpts.some((o) => num(o.priceDollars) === num(out.newPriceDollars))) next.price = cur.price
+  if (options.length) next.options = options; else delete next.options
   const pricedRule = next.rules.some((r) => r.do.kind === 'set_price' && !rules.some((x) => sameRule(x, r)))
   if (out.askedPriceChange === true && next.price === cur.price && !pricedRule && !free) {
     return { reply: 'How much? Write the new price (e.g. 3.50) or a percentage (e.g. +10%).' }
   }
   if (JSON.stringify(next) === JSON.stringify(cur)) {
     if (already && !ruleProblem) return { reply: 'This rule is already on the device. Anything else?' }
-    return { reply: ruleProblem || 'I did not get what to change. You can change the price ("price 2.50", "+10%"), add a rule ("lock it after 22:00", "maintenance every 50 uses") or remove one ("remove rule 1").' }
+    return { reply: ruleProblem || 'I did not get what to change. You can change the price ("price 2.50", "+10%"), add a rule ("lock it after 22:00", "maintenance every 50 uses"), remove one ("remove rule 1") or add a service ("add cappuccino 2.00").' }
   }
   return { proposed: next }
 }
