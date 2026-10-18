@@ -102,11 +102,15 @@ function payerKeyFor (hubKey) {
 async function hubApi (hubUrl, route, body) {
   const base = String(hubUrl || '').replace(/\/+$/, '')
   if (!/^https?:\/\/[^\s/]+/.test(base)) throw new Error('hubUrl must be http(s)://host:port')
-  const res = await fetch(base + '/api' + route, {
+  const call = () => fetch(base + '/api' + route, {
     method: body ? 'POST' : 'GET',
     headers: { 'Content-Type': 'application/json' },
     body: body ? JSON.stringify(body) : undefined
   })
+  // After rgb-lib froze this process (a sync can take a minute), the kept-alive socket to the hub
+  // may be closed on the other side: the first fetch then fails with "fetch failed". Retry once.
+  let res
+  try { res = await call() } catch { res = await call() }
   const data = await res.json().catch(() => ({}))
   if (!res.ok) throw new Error(data.error || `Hub answered HTTP ${res.status}`)
   return data
