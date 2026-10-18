@@ -385,7 +385,7 @@ async function pay (h, s) {
     track(1, `Paying ${money(c.amount)} ${DOLLAR}…`)
     entry = { hubUrl: h.url, serviceId: s.id, name: s.name, paymentId, amount: c.amount, wallet: current().url, at: Date.now(), step: 1, msg: `Your wallet is paying ${money(c.amount)} ${DOLLAR}…`, cls: 'info' }
     pending = pending.filter((x) => !(x.hubUrl === h.url && x.serviceId === s.id)).concat(entry)
-    savePending()
+    savePending(); render() // the list already says "Your payment" if the guest closes this screen now
     // 4. pay exactly what was confirmed (can take a minute when the wallet has to sync first)
     const paid = await walletApi('/api/pay-request', { hubUrl: h.url, paymentId, expect: { assetId: c.assetId, amount: c.amount } })
     // 5. follow the hub's public payment record, also if the guest closes this screen
