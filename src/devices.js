@@ -73,7 +73,34 @@ export function validateDevice (cfg, { current } = {}) {
   if (errors.length) throw new Error(errors.join(' '))
   const clean = { id, name, icon: String(cfg.icon || 'device').slice(0, 20), type: cfg.type, price: cfg.price, unit: String(cfg.unit || 'use').slice(0, 12), commands, rules, version: Number.isInteger(cfg.version) && cfg.version > 0 ? cfg.version : 1 }
   if (cfg.type === 'rent' && Number.isInteger(cfg.maxHours) && cfg.maxHours > 0) clean.maxHours = Math.min(cfg.maxHours, 24)
+  // options: one device, several things to buy (espresso / cappuccino, quick / normal cycle), each with its own price
+  const options = []
+  for (const o of Array.isArray(cfg.options) ? cfg.options.slice(0, 6) : []) {
+    const oname = String(o?.name || '').trim().slice(0, 30)
+    const oid = String(o?.id || oname).toLowerCase().normalize('NFD').replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 30)
+    if (!oname || !oid) { errors.push('Every option needs a name.'); continue }
+    if (!Number.isInteger(o.price) || o.price < 0 || o.price > 100_000) { errors.push(`The price of "${oname}" must be a whole number of cents.`); continue }
+    if (!options.some((x) => x.id === oid)) options.push({ id: oid, name: oname, price: o.price })
+  }
+  if (errors.length) throw new Error(errors.join(' '))
+  if (options.length) clean.options = options
   return clean
+}
+
+// "options: espresso 1.50, cappuccino 2.00" → [{ name, price }] (prices written by the host, read by code, never by the AI).
+// "no options" → []. Anything else → null (the AI handles the request).
+export function parseOptions (text) {
+  const t = String(text || '').trim()
+  if (/^(no|nessuna|remove( the)?|togli( le)?) (options?|opzioni)\b/i.test(t)) return []
+  const m = t.match(/^(?:options?|opzioni|choices?|scelte)\s*[:=]?\s*(.+)$/i)
+  if (!m) return null
+  const out = []
+  for (const part of m[1].split(/[;\n]+|,(?!\d)/)) { // "3,50" keeps its decimal comma
+    const pm = part.trim().match(/^(.+?)\s*[:=-]?\s*\$?(\d+(?:[.,]\d{1,2})?)\s*(?:\$|husd|dollars?|euro|€)?$/i)
+    if (!pm) return null
+    out.push({ name: pm[1].trim(), price: Math.round(Number(pm[2].replace(',', '.')) * 100) })
+  }
+  return out.length ? out : null
 }
 
 // What changed between two configs, in words the host reads before pressing Apply.
@@ -83,6 +110,8 @@ export function diffDevices (a, b) {
   const ra = (a.rules || []).map(ruleText); const rb = (b.rules || []).map(ruleText)
   for (const r of rb) if (!ra.includes(r)) out.push({ field: 'rule', to: r })
   for (const r of ra) if (!rb.includes(r)) out.push({ field: 'rule', from: r })
+  const opt = (d) => (d.options || []).map((o) => `${o.name} ${(o.price / 100).toFixed(2)}`).join(', ')
+  if (opt(a) !== opt(b)) out.push({ field: 'options', from: opt(a) || 'none', to: opt(b) || 'none' })
   return out
 }
 
@@ -195,7 +224,7 @@ export class DeviceLayer {
   }
 
   // ---------- public: a guest orders a device; the price comes from the device config, never from the request ----------
-  async order (id, { hours } = {}) {
+  async order (id, { hours, option } = {}) {
     const cfg = this.get(id)
     if (!this.dollarId) throw new Error('This hub has no dollar asset configured (DOLLAR_ASSET).')
     if (cfg.type === 'access') throw new Error('A door is opened with your key, not paid.')
@@ -203,18 +232,21 @@ export class DeviceLayer {
     if (st.status === 'running') throw new Error(`${cfg.name} is busy. Try again in a moment.`)
     if (st.status === 'locked') throw new Error(`${cfg.name} is locked by the owner's rules right now.`)
     const h = cfg.type === 'rent' ? Math.min(Math.max(1, Math.round(Number(hours) || 1)), cfg.maxHours || 24) : 1
-    const amount = this.effectivePrice(cfg) * h
+    // with options the guest picks one; its price comes from the config, never from the request
+    const opt = cfg.options?.length ? cfg.options.find((o) => o.id === option) : null
+    if (cfg.options?.length && !opt) throw new Error(`Choose one of: ${cfg.options.map((o) => o.name).join(', ')}.`)
+    const amount = (opt ? opt.price : this.effectivePrice(cfg)) * h
     const p = await this.hub.requestPayment({
       assetId: this.dollarId, amount,
-      description: cfg.type === 'rent' ? `${cfg.name}, ${h} h` : `${cfg.name}, 1 ${cfg.unit}`,
-      meta: { serviceId: cfg.id, hours: h }
+      description: opt ? `${cfg.name}, ${opt.name}` : cfg.type === 'rent' ? `${cfg.name}, ${h} h` : `${cfg.name}, 1 ${cfg.unit}`,
+      meta: { serviceId: cfg.id, hours: h, option: opt?.id }
     })
-    return { id: p.id, serviceId: cfg.id, assetId: p.assetId, amount: p.amount, hours: h, invoice: p.invoice, recipientId: p.recipientId, status: p.status }
+    return { id: p.id, serviceId: cfg.id, assetId: p.assetId, amount: p.amount, hours: h, option: opt?.id, invoice: p.invoice, recipientId: p.recipientId, status: p.status }
   }
 
   publicService (cfg) {
     const v = this.view(cfg)
-    return { id: v.id, name: v.name, icon: v.icon, type: v.type, price: v.price, unit: v.unit, maxHours: v.maxHours, rules: v.rules, state: v.state }
+    return { id: v.id, name: v.name, icon: v.icon, type: v.type, price: v.price, unit: v.unit, maxHours: v.maxHours, options: v.options, rules: v.rules, state: v.state }
   }
 
   // ---------- HTTP ----------
@@ -237,6 +269,8 @@ export class DeviceLayer {
     r.post('/devices/chat', owner, wrap(async (req) => {
       if (req.body?.base && req.body?.text) {
         const base = validateDevice(req.body.base)
+        const opts = parseOptions(req.body.text)
+        if (opts) return { reply: 'Options set. Check them and add the machine, or tell me what else to change.', proposed: validateDevice({ ...base, options: opts }, { current: base }) }
         const out = await editDevice(String(req.body.text), base)
         if (out.reply) return { reply: out.reply }
         return { reply: 'Updated. Check it and apply it, or tell me what else to change.', proposed: validateDevice(out.proposed, { current: base }) }
@@ -252,7 +286,8 @@ export class DeviceLayer {
       const text = req.body?.text || msgs.filter((m) => m?.role === 'host').map((m) => m.text).join('. ')
       // { base }: the proposal on screen, so changes add up ("price 3", then "and lock it after 22")
       const base = req.body?.base ? validateDevice({ ...req.body.base, version: current.version }, { current }) : current
-      const r = await editDevice(text, base)
+      const opts = parseOptions(String(req.body?.text || '').split('. ').pop()) // the latest request
+      const r = opts ? { proposed: { ...base, options: opts } } : await editDevice(text, base)
       if (r.reply) return { reply: r.reply }
       const proposed = validateDevice(r.proposed, { current })
       return { proposed, diff: diffDevices(current, proposed) }
