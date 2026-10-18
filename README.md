@@ -1,6 +1,10 @@
 # HubWallet
 
-> The home has a wallet and an assistant. Every device has its own price, its own rules and its own balance: it grants access, gets paid and pays for its own restocks, in dollars on Bitcoin, with an AI that never leaves the house.
+> Whoever offers a physical service (a laundromat, a coworking space, a short-term rental) puts a small box in the
+> shop: the **hub**. A customer scans a QR, picks a service and pays in **dollars on Bitcoin with RGB** from their own
+> wallet — no app to install, no card, no platform in between. The hub **sees and receives payments but cannot
+> spend**: only the owner holds that key. A **local AI** helps the owner set up devices and rules in plain language,
+> without sending the business's data to the cloud.
 
 **Team:** AVL
 **Event:** Agentic Dollars on Bitcoin, BLOX Turin, 17–18 October 2026
@@ -8,79 +12,114 @@
 
 ## The problem
 
-Short-term rental hosts manage access and extras with tools that do not fit:
+Paying a small amount to a shared machine today means a card reader with fees and minimums, or a platform app that
+takes a cut and collects data. A washing machine or a vending machine cannot open a bank account, so it cannot be
+paid directly or pay for its own restock.
 
-- Door codes are sent by message and can be copied and shared.
-- Extras (washing machine, minibar) are either not charged at all, run on trust, or need a different app or card for each device.
-- Booking and smart-home platforms collect data on who comes in and when. Usage data reveals when a home is empty.
-- A device cannot open a bank or Stripe account, so it cannot get paid or pay for anything by itself.
+## How it works
 
-## Our solution
+Three roles, two kinds of keys:
 
-A home hub that lets a host sell or rent any shared service, with a local AI that turns plain language into working services.
+- **The hub** (`src/hub.js` + `src/hub-core.js` + `src/devices.js`) is the box in the shop. It holds only **public**
+  keys (xpubs): it can create invoices and see what it received, but it **cannot sign a spend**. It is reachable on
+  the local network; customers open its pages from a QR code.
+- **The client** (`src/guest.js`) is the customer's own wallet. It decodes the hub's invoice itself, shows exactly
+  what it is about to pay, and signs with its own seed — the hub never sees a private key.
+- **The service provider's signer** (`src/signer.js`) holds the hub's seed (in the product, the owner's phone). The
+  hub only ever *prepares* a transaction (a PSBT); the signer shows it in plain language and asks for a yes before
+  signing. Receiving a payment needs no signature at all; only the owner's outgoing transfers do (restocks, moving
+  earnings to a personal wallet).
 
-- **Any service, three templates.** The host describes what they offer ("e-bike in the courtyard, 3 dollars an hour, max 4 hours, daytime only") and the AI turns it into a service: **access** (an RGB token you hand over to get in), **pay-per-use** (USDT per use) or **time-based rental** (an RGB token valid for a number of hours).
-- **Behaviours.** Each service can also have behaviours, described in plain language and turned into rules: "if fewer than 3 beers are left, propose a restock", "weekend price +20%", "if the bike is not back after 4 hours, keep the deposit". Any action that spends money is proposed to the host, who approves it.
-- **Access as an asset.** A stay is an RGB asset issued by the host and owned by the guest. The guest can pass it to a friend without asking anyone, and opens the door by transferring it to the lock.
-- **Nearby services.** The guest scans a QR code on the device, or simply asks: "I need to do a wash and then take the bike for 2 hours". The AI proposes the bundle, the code computes the price, the guest confirms and pays in USDT on RGB.
-- **The hub is the economic agent of the home.** Each device has its own account and rules; the hub's local AI manages them. Giving each device its own wallet is a later step.
+This is a **watch-only wallet with an external signer over PSBT** (BIP-174) — the same pattern BTCPay Server uses for
+custodying nothing. Every signature in the system — the customer paying, the owner approving a spend — goes through
+**WDK** (`@utexo/wdk-wallet-rgb`); the hub itself uses `rgb-sdk` directly only because it must never hold a seed.
 
-## Why this stack
+**Local AI (QVAC, Qwen3.5 2B).** The owner describes a device or a change in plain language ("a dryer, 2 dollars a
+cycle, lock it after 22:00"); the model only fills a JSON schema, the code validates every field and computes every
+number, and the owner presses Apply before anything is saved. The AI never moves money and never touches a key — a
+small local model can be wrong, so its reach is deliberately narrow. It runs on a machine on the local network in the
+demo (confirmed by the mentors as on-device); in the product it runs inside the hub, because prices, rules and usage
+patterns are the business's own data.
 
-- **RGB:** access rights and dollars are assets the user actually owns, transfers privately and verifies client-side. There is no central database of guests and no intermediary.
-- **QVAC:** microphones and usage data stay inside the home. There is no cost per request for small hosts, and it works offline.
-- **Why not Stripe:** a fridge cannot open a Stripe account, and a card payment does not give the guest a key they own and can pass on.
+**Privacy.** RGB puts only a 32-byte commitment inside an ordinary Bitcoin transaction: the asset, the amount and the
+parties are known only to the two wallets involved, and the receiver validates the payment itself (client-side
+validation). The hub keeps no name, email, phone or IP — only a payment id, what was sold, the amount, the txid and a
+hash-chained log, enough to reconcile earnings and answer a dispute without identifying anyone.
 
-## What works (built during the hackathon)
+## Demo scope
 
-- **Hub** (`src/hub.js`, `src/hub-core.js`): one per place, with its own **watch-only RGB wallet** (no seed on the hub). It sells the services of its machines, creates RGB invoices, validates incoming payments client-side (rgb-lib) and starts the machine when the payment settles on Mutinynet. Every spend (e.g. moving earnings to the host) is prepared by the hub and **signed only by the host** with `src/signer.js`.
-- **Guest wallet** (`src/guest.js`): a self-custodial **Tether WDK** wallet (`wdk-wallet-rgb`). It decodes the hub's invoice itself, shows what it will pay, pays in our test dollar HUSD and keeps the hub's signed receipt.
-- **Machines with services** (`src/devices.js`): a washing machine with 30° / 40° / 60° washes, a coffee machine with espresso / cappuccino; each service has its price, its run time and the hours it is offered.
-- **Local AI (QVAC, Qwen3.5 2B)** (`src/ai.js`): the host adds a machine or changes it in plain language ("add a dryer, 2 dollars a cycle", "lock it after 22:00", "weekend +10%", "add a 60° wash for 3.50, 90 minutes"). The AI only proposes; **code validates every number** (a price is kept only if the host wrote it) and the host presses Apply. Requests about keys, guests' identities or moving money get a fixed answer from code, before any model call.
-- **Web apps** (`web/`): host app (desktop and phone), guest app (phone), device screen with QR.
+A laundromat (**Laundry**) whose washing machine sells three services — a 30°, a 40° and a 60° wash, each with its own
+price and run time. Machines can also have rules (lock at night, weekend prices, maintenance every N uses) and services
+offered only at some hours (a cappuccino 7–11).
 
-Every payment shown is a real RGB transfer on Mutinynet. The machines are simulated web pages.
+1. **Host (desktop):** add the Laundry hub (address + owner key). "Add a machine" → tell the local AI "a dryer,
+   2 dollars per cycle" → Add. Services can be listed the same way ("a coffee machine with espresso 1.20 and
+   cappuccino 2"); prices, minutes and hours are read by code, never invented by the model.
+2. **While the guest app picks up the new machine:** on the washing machine ask the AI for rules ("lock it after
+   22:00", "weekend +10%") → the proposal shows the diff → Apply.
+3. **Guest (phone):** the dryer appears → Pay → the wallet shows what it decoded from the hub's invoice → Confirm.
+   About one Bitcoin block later the hub says "paid", the dryer starts and the guest keeps the hub's signed receipt.
+   The payment stays visible even if the guest closes the screen.
+
+The local AI only proposes. Requests about keys or seeds, guests' identities or moving money get a fixed answer from
+the code before any model call; removals, percentages and prices count only when the host wrote them.
 
 ## Run it
 
-Requirements: Linux x86_64, **Node 22**, network access to Mutinynet (`esplora.signet.kaleidoswap.com`, `proxy.kaleidoswap.com`).
-
 ```bash
 npm install
-node src/signer.js init hub-demo            # host side, once: keeps the seed, writes data/hub-demo/hub-keys.json
-# the hub (watch-only). QVAC_* = the OpenAI-compatible server of `qvac serve --openai` (optional: without it the AI is off)
-QVAC_URL=http://<ai-pc>:11434 QVAC_API_KEY=<key> MINUTE_MS=1000 USE_MS=45000 \
-HUB_NAME=Laundry PORT=8080 WALLET=hub-demo DOLLAR_ASSET=<rgb:… asset id of the dollar> node src/hub.js
-PORT=8090 WALLET=guest-demo node src/guest.js     # the guest's wallet, localhost only
-node src/signer.js watch hub-demo http://localhost:8080   # the host approves spends here
+node src/signer.js init hub-demo                              # once: the hub's seed stays here, the hub gets public keys
+HUB_NAME=Laundry PORT=8080 WALLET=hub-demo DEMO_DEVICES=1 MINUTE_MS=1000 \
+  DOLLAR_ASSET=<rgb:… id of the dollar asset> \
+  QVAC_URL=http://<ai-host>:11434 QVAC_API_KEY=... npm run hub  # the hub (watch-only)
+node src/signer.js watch hub-demo http://localhost:8080        # the owner's signer (approves spends with y/n)
+PORT=8090 WALLET=guest-demo npm run guest                      # the customer's wallet, serves web/guest.html
 ```
+- Host app: `http://localhost:8080/host.html` → "Add a hub": `http://localhost:8080` + the owner key printed by the hub
+  (`data/<wallet>/owner-key.txt`, never committed). Device screen: `web/device.html?id=washer`.
+- Guest app: `http://localhost:8090/guest.html`, or `guest.html?hubs=<hub url>` to be offered the hub.
+- `MINUTE_MS=1000` makes one service minute last one second in the demo (a 30 min wash runs 30 s); `USE_MS` is the run
+  time of a machine without services.
+- Phone: the guest wallet behind a password tunnel (Pinggy `b:user:pass`), the hub behind a Cloudflare quick tunnel
+  (no interstitial page); the phone opens `<wallet tunnel>/guest.html?hubs=<hub tunnel>`. The wallet server can spend:
+  never expose it without a password.
+- Wallets need sats for fees and free UTXOs; the wallet creates UTXOs itself when it runs out. rgb-lib is synchronous:
+  balance reads use the local database and the indexer sync runs only when needed (`docs/PERF.md`).
 
-- Host app: `http://localhost:8080/host.html` → "Add a hub": `http://localhost:8080` + the owner key printed by the hub (`data/hub-demo/owner-key.txt`, never committed).
-- Guest app: `http://localhost:8090/guest.html` → "Connect a hub", or open `guest.html?hubs=<hub url>`.
-- `MINUTE_MS=1000` makes one service minute last one second (a 30 min wash runs 30 s in the demo).
-- Wallets need sats for fees and free UTXOs: the guest app offers "Prepare my wallet", and the wallet creates UTXOs itself when it runs out.
-- Phone demo: the guest wallet behind a password tunnel (Pinggy, `b:user:pass`) and the hub behind a Cloudflare quick tunnel; the guest opens `<wallet tunnel>/guest.html?hubs=<hub tunnel>`.
+See `API_usage.md` for the HTTP API and `CLAUDE.md` for the AI contract.
 
-## Demo
+## Real vs simulated
 
-1. Host (desktop): add the **Laundry** hub; it has a washing machine with 30° / 40° / 60° washes.
-2. Host: "Add a machine" → tell the AI "a dryer, 2 dollars per cycle" → Add.
-3. While the guest app picks it up: on the washing machine ask the AI for rules ("lock it after 22:00", "weekend +10%") → Apply.
-4. Guest (phone): the dryer appears → Pay → the wallet shows what it checked → Confirm. About a minute later (one Bitcoin block) the hub says "paid" and the dryer starts; the receipt is signed by the hub.
+- **Real:** every RGB transfer, on Mutinynet; the local AI; the hub holds no seed (its data folder has only public
+  keys and the RGB stash — check it).
+- **Simulated:** the machines are web pages, not a real relay; we issue our own test dollar **HUSD** instead of the
+  event's USDT faucet, because WDK's RGB adapter runs on the `signet` network while that faucet is on `signetcustom` —
+  confirmed by the mentors as fine for judging; every role runs as a separate process with its own data folder on one
+  PC, standing in for separate devices in the product.
 
-## Stack (as built)
+## Stack and third-party tools
 
-- RGB on Bitcoin (Mutinynet, rgb-lib `signet`) through UTEXO `rgb-sdk` / `@utexo/rgb-lib` 0.3; our own NIA test dollar **HUSD** (precision 2).
-- Tether **WDK** `@utexo/wdk-wallet-rgb` for the guest and host wallets; watch-only rgb-sdk wallet + external PSBT signing for the hub.
-- **QVAC** local AI (`qvac serve --openai`, Qwen3.5 2B) on a team member's PC, JSON schema output.
-- Node 22 + Express, plain HTML/CSS/JS pages. Performance notes: `docs/PERF.md`.
+- **RGB**: `@utexo/wdk-wallet-rgb` and `rgb-sdk` (watch-only wallet), RGB-Tools / `rgb-protocol` v0.11.1, Mutinynet.
+- **QVAC**: `@qvac/sdk`, Qwen3.5 2B (4-bit), OpenAI-compatible local server.
+- **UI**: plain HTML/CSS/JS (no build step); glass styling adapted from
+  [LiquidGlassSkill](https://github.com/stormaref/LiquidGlassSkill) (MIT) and a from-scratch JavaScript port of the
+  edge-refraction technique in [liquid-glass-js](https://github.com/dashersw/liquid-glass-js) (MIT, © Armagan
+  Amcalar) — both license headers are kept in `web/liquid-glass.css` and `web/refraction.js`.
+- Express for the HTTP servers.
 
 ## Work done before the hackathon
 
-No product code in this repository. Before the event we ran a feasibility test of WDK on Mutinynet (issue a test asset and transfer it between two wallets, outside this repo), studied the documentation and tutorials, set up the development environment and planned the idea. To explain the idea to the team we made a clickable UI mockup (a single HTML page with simulated data, no RGB and no AI). If we reuse any of its layout, we will say so in the commit. All RGB and QVAC integration will be written during the hackathon, with dated commits.
+No product code. Before the event we studied the documentation, set up the environment, and ran a throwaway
+feasibility spike the night before (WDK + RGB on Mutinynet, outside this repo, keys never copied in) to confirm the
+watch-only / external-signer pattern would work — see `notes/spike-wdk.md` in the team's knowledge folder. We also
+made a clickable UI mockup (a single HTML page, simulated data, no RGB, no AI) to explain an earlier version of the
+idea to the team; none of its code is reused here. All RGB, QVAC and UI code in `src/` and `web/` was written during
+the hackathon, with dated commits.
 
-## Vision (beyond the hackathon)
+## Vision
 
-The same hub works wherever a device is shared: laundromats, coworking spaces, gyms, EV chargers. Commercial machines already have payment interfaces (MDB for vending, pulse inputs for laundry, OCPP for chargers) where the coin mechanism can be replaced. Home Assistant and Matter integration makes thousands of existing devices compatible.
-
-Every service can sell (its template) and buy (its behaviours). When services belong to different owners, machines pay each other: a bike buys a charge from a neighbour's station, a washing machine runs when the building's solar energy is cheapest.
+The same hub works wherever a machine is shared: laundromats, coworking spaces, gyms, EV chargers — commercial
+machines already have payment interfaces (MDB for vending, pulse inputs for laundry, OCPP for chargers) where the
+coin mechanism can be replaced. Next steps: RGB over Lightning for instant payments, real hardware (a relay instead
+of a web page), encrypted data at rest on the hub with a daily on-chain anchor for the log, and pre-authorised
+signing limits so small recurring spends (a restock, a hub paying another hub) do not need a human every time.
