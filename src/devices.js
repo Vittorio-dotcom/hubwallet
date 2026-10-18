@@ -112,8 +112,10 @@ function parseItem (t) {
 const ITEM_REV = /^(\d+(?:[.,]\d{1,2})?)\s*(?:€|eur|euro|\$|dollars?|husd)?\s+(?:(?:for|per|the|a|al|il|la|lo|le)\s+)?(.+)$/i
 const RULEISH = /(rul|regol|lock|blocc|unlock|sblocc|after|dopo|before|prima|mainten|manutenz|%|weekend|notify|avvisa|ogni|every|uses|usi)/i
 export function listedOptions (text) {
-  const t = String(text || '').trim().replace(/[.!]+$/, '')
+  let t = String(text || '').trim().replace(/[.!]+$/, '')
   if (RULEISH.test(t)) return null
+  const w = t.match(/^(.*?)\b(?:with|con|che fa|that makes)\b\s*(.+)$/i) // "a coffee machine with espresso 1,20 and cappuccino 2"
+  if (w && /\d/.test(w[2])) t = w[2]
   const parts = t.split(/[;\n]+|,(?!\d)|\s+(?:and|e|ed|or|oppure)\s+/i).map((x) => x.trim()).filter(Boolean)
   const items = []
   for (const [i, part] of parts.entries()) {
@@ -350,8 +352,13 @@ export class DeviceLayer {
         if (out.reply) return { reply: out.reply }
         return { reply: 'Updated. Check it and apply it, or tell me what else to change.', proposed: validateDevice(out.proposed, { current: base }) }
       }
-      // first proposal: options the host already listed in the chat ("options: espresso 1.50, cappuccino 2") go in too
-      const out = await chatDevice(req.body?.messages, { existingIds: this.list().map((d) => d.id) })
+      // first proposal: options the host already listed in the chat ("options: espresso 1.50, cappuccino 2") go in too.
+      // A listed message also tells the chat the base price (the lowest), so it does not keep asking "how much?".
+      const msgs = (req.body?.messages || []).map((m) => {
+        const l = m?.role === 'host' && listedOptions(m.text)
+        return l ? { ...m, text: `${m.text}. Price ${(Math.min(...l.map((o) => o.price)) / 100).toFixed(2)}` } : m
+      })
+      const out = await chatDevice(msgs, { existingIds: this.list().map((d) => d.id) })
       if (out.proposed) {
         let opts = null
         for (const m of (req.body?.messages || []).filter((x) => x?.role === 'host')) opts = optionChange(m.text, opts || []) || opts
