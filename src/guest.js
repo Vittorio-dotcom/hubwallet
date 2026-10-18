@@ -66,13 +66,16 @@ function syncNow ({ force = false } = {}) {
 // rgb-lib picks inputs and change from its local view of our UTXOs, which is only as fresh as the
 // last sync (we no longer sync on every balance read). If it finds no room or no bitcoin, that view
 // may just be old: sync once and try again. "Dollars still settling" also gets a refresh first.
+// The sync can take a minute: `recheck` runs again before the retry (invoice not expired, request
+// still unpaid and unchanged), and throws if paying is no longer right.
 const STALE = /InsufficientAllocationSlots|InsufficientBitcoins|InsufficientAssignments/
-async function sendFresh (args) {
+async function sendFresh (args, recheck = async () => {}) {
   try { return await wallet.send(args) } catch (e) {
     if (!STALE.test(String(e.message || e))) throw e
     console.log(`[send] ${String(e.message || e)}: sync and retry once`)
     await refreshNow()
     await syncNow({ force: true })
+    await recheck()
     return wallet.send(args)
   }
 }
@@ -171,7 +174,8 @@ app.post('/api/pay-request', wrap(async (req) => {
   const { hubUrl, paymentId, expect, anonymous = false } = req.body || {}
   if (!expect) throw new Error('expect { assetId, amount } is required: pass what the user confirmed.')
   const c = await check(hubUrl, paymentId, expect)
-  const sent = await sendFresh({ assetId: c.assetId, amount: c.amount, invoice: c.invoice }) // WDK signs here
+  const sent = await sendFresh({ assetId: c.assetId, amount: c.amount, invoice: c.invoice }, // WDK signs here
+    async () => { const again = await check(hubUrl, paymentId, expect); if (again.invoice !== c.invoice) throw new Error('The request changed while your wallet was syncing. Nothing was paid.') })
   balanceCache = null // the wallet changed: next /api/me reads it again
   let payerTag = null
   let claimError
@@ -208,7 +212,9 @@ app.post('/api/pay', wrap(async (req) => {
   if (!String(invoice || '').startsWith('rgb:')) throw new Error('invoice must be an RGB invoice (rgb:...).')
   const inv = await wallet.decodeInvoice(invoice)
   if (inv.assetId && inv.assetId !== assetId) throw new Error('The invoice asks for a different asset.')
-  const r = await sendFresh({ invoice, assetId, amount: Number(amount) })
+  const notExpired = () => { if (inv.expirationTimestamp && inv.expirationTimestamp * 1000 < Date.now()) throw new Error('The invoice has expired.') }
+  notExpired()
+  const r = await sendFresh({ invoice, assetId, amount: Number(amount) }, async () => notExpired())
   balanceCache = null
   trace.append('pay.sent', inv.recipientId, { assetId, amount: Number(amount), txid: r.txid, description: String(description).slice(0, 200) })
   burst(`paid ${inv.recipientId}`)
