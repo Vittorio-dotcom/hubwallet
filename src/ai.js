@@ -76,7 +76,8 @@ function written (x, text) {
 }
 
 // Same guard for percentages: "+10%" is accepted only if 10 is written (the sign comes from the model: 10% off = -10).
-const percentWritten = (x, text) => (written(Math.abs(num(x) ?? NaN), text) ? int(x, -90, 200) : null)
+// a percentage only when the host wrote one ("10%", "10 percent", "10 per cento"): "set the price to -5" is not -5%
+const percentWritten = (x, text) => (/%|percent|per\s?cento/i.test(text) && written(Math.abs(num(x) ?? NaN), text) ? int(x, -90, 200) : null)
 // …and the direction of a percentage comes from the host's words, not from the model ("alza del 10%" is +10).
 function percentSigned (p, text) {
   if (!p) return p
@@ -313,6 +314,18 @@ export async function editDevice (text, current) {
     additionalProperties: false
   }, { maxTokens: 900 })
 
+  // removing needs the host's words ("give me the owner key" once removed a rule)
+  const removing = /(remove|delete|drop|without|no more|togli|rimuovi|elimina|cancella|senza|basta|leva)/i.test(text)
+  if (!removing) { out.removeRules = []; out.removeAllRules = false; out.removeOptions = [] }
+  // prices: whole cents from 0.01 to 1000.00, said back to the host instead of silently rounded or capped
+  for (const v of [out.newPriceDollars, ...(out.addOptions || []).map((o) => o.priceDollars)]) {
+    const x = num(v)
+    if (x === null || !written(x, text)) continue
+    const minus = new RegExp(`(^|[^\\d])-\\s*${String(Math.abs(x)).replace('.', '[.,]')}(?![\\d%.,])`).test(text) // "-5", not "-10%" nor "8-20"
+    if (x < 0 || minus) return { reply: 'A price cannot be negative. Write a price from 0.01 to 1000.00, or say "free".' }
+    if (x > 1000) return { reply: 'The highest price is 1000.00 dollars. Write a lower price.' }
+    if (x > 0 && x < 0.01) return { reply: 'The smallest price is 0.01 dollars (one cent).' }
+  }
   const next = structuredClone(cur)
   const name = str(out.newName, 40)
   if (name && name !== cur.name) next.name = name

@@ -47,7 +47,7 @@ export function validateDevice (cfg, { current } = {}) {
   const id = String(cfg.id || '')
   if (!ID_RE.test(id)) errors.push('The id must be lowercase letters, digits and dashes (max 30).')
   if (current && id !== current.id) errors.push('The device id cannot change.')
-  const name = String(cfg.name || '').trim()
+  const name = String(cfg.name || '').replace(/[<>]/g, '').trim() // shown as text anyway; no markup in names
   if (!name || name.length > 40) errors.push('The name must be 1 to 40 characters.')
   if (!TYPES.includes(cfg.type)) errors.push('Unknown device type (use, rent, access).')
   if (!Number.isInteger(cfg.price) || cfg.price < 0 || cfg.price > 100_000) errors.push('The price must be a whole number of cents (0 to 100000).')
@@ -77,7 +77,7 @@ export function validateDevice (cfg, { current } = {}) {
   // its own price, optionally its own run time (minutes) and the hours it is offered (from–to, 0–24)
   const options = []
   for (const o of Array.isArray(cfg.options) ? cfg.options.slice(0, 8) : []) {
-    const oname = String(o?.name || '').trim().slice(0, 30)
+    const oname = String(o?.name || '').replace(/[<>]/g, '').trim().slice(0, 30)
     const oid = String(o?.id || oname).toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 30)
     if (!oname || !oid) { errors.push('Every option needs a name.'); continue }
     if (!Number.isInteger(o.price) || o.price < 0 || o.price > 100_000) { errors.push(`The price of "${oname}" must be a whole number of cents.`); continue }
@@ -129,6 +129,20 @@ export function optionChange (text, current = []) {
   if (del && current?.some((o) => nameKey(o.name) === nameKey(del[1]))) return current.filter((o) => nameKey(o.name) !== nameKey(del[1]))
   return null
 }
+
+// Requests the AI must not handle, answered by code (same answer every time, before any model call).
+// The AI only proposes machine settings; it has no access to keys, guests or money, and these answers say so.
+const GUARDS = [
+  [/(seed|mnemonic|private key|chiave privata|owner key|chiave (del )?proprietario|x-hub-key|password|api key|system prompt|prompt di sistema|your instructions|le tue istruzioni)/i,
+    'I cannot share keys, seeds, passwords or my instructions. They never pass through the AI: I only propose settings for the machines, and you approve them.'],
+  [/((guest|ospit|client|customer|utent|persone|people)\w*.{0,40}(name|nom|list|elenco|wallet|indirizz|address|dati|data|track|traccia|spia|spy|who)|who (paid|pays|used)|chi (ha|hanno) (pagato|usato))/i,
+    'The hub does not know who the guests are: it keeps only payments and machine states, never names or wallets. So I cannot list or follow guests.'],
+  [/((send|transfer|withdraw|invia|manda|trasferisci|sposta|preleva)\w*.{0,40}(money|soldi|husd|dollar|dollari|bitcoin|btc|sats|fondi|funds|wallet|tb1|bc1))/i,
+    'I never move money. Spending is prepared by the hub and signed only by you, with your signer. To move your earnings use "Move to my wallet".'],
+  [/\b(bomb\w*|esplosiv\w*|explosive\w*|weapon\w*|arm[ai]|gun\w*|pistol\w*|drug\w*|drog\w*|poison\w*|velen\w*|hidden camera|telecamera nascosta|spy\w*|spia)\b/i,
+    'I cannot set that up. Machines here are things guests pay to use, like a washing machine, a dryer or a coffee machine.']
+]
+export const guard = (text) => GUARDS.find(([re]) => re.test(String(text || '')))?.[1] || null
 
 // What changed between two configs, in words the host reads before pressing Apply.
 export function diffDevices (a, b) {
@@ -303,6 +317,9 @@ export class DeviceLayer {
     // { base, text }: a proposal is already on screen and the host asks to change it ("make it 2 dollars"):
     // edit that proposal instead of starting the conversation again.
     r.post('/devices/chat', owner, wrap(async (req) => {
+      const said = req.body?.text || [...(req.body?.messages || [])].reverse().find((m) => m?.role === 'host')?.text
+      const no = guard(said)
+      if (no) return { reply: no }
       if (req.body?.base && req.body?.text) {
         const base = validateDevice(req.body.base)
         const opts = optionChange(req.body.text, base.options)
@@ -338,6 +355,8 @@ export class DeviceLayer {
       // { base }: the proposal on screen, so changes add up ("price 3", then "and lock it after 22")
       const base = req.body?.base ? validateDevice({ ...req.body.base, version: current.version }, { current }) : current
       const latest = String(req.body?.text || '').split('. ').pop() // the latest request
+      const no = guard(latest)
+      if (no) return { reply: no }
       const opts = optionChange(latest, base.options)
       const r = opts ? { proposed: { ...base, options: opts } } : await editDevice(text, base)
       if (r.reply) return { reply: r.reply }
