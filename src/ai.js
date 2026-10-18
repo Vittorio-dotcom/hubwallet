@@ -364,8 +364,10 @@ export async function editDevice (text, current) {
   // options: price, minutes and hours are kept only if the host wrote those numbers (money guard)
   const key = (n) => String(n).toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[^a-z0-9]+/g, '')
   const dropOpt = new Set((out.removeOptions || []).map(key))
-  let options = (cur.options || []).filter((o) => !dropOpt.has(key(o.name)))
   const addOpts = (out.addOptions || []).filter((o) => str(o.name, 30))
+  // the first option on a machine with a price keeps that price as "standard" unless the host gave every price
+  const first = !(cur.options || []).length && addOpts.length === 1 && cur.price > 0 && cents(addOpts[0].priceDollars) !== cur.price
+  let options = (first ? [{ name: 'standard', price: cur.price }] : cur.options || []).filter((o) => !dropOpt.has(key(o.name)))
   for (const o of addOpts) {
     if (!written(o.priceDollars, text)) { ruleProblem = `How much is ${str(o.name, 30)}? Write its price (e.g. "${str(o.name, 30)} 2.00").`; continue }
     const opt = { name: str(o.name, 30), price: cents(o.priceDollars) }

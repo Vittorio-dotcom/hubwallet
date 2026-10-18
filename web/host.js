@@ -263,7 +263,10 @@ $('#edit-form').addEventListener('submit', async (e) => {
   const h = hub()
   try {
     const r = await call(`${h.url}/api/devices/${encodeURIComponent(current.id)}/edit`, { key: h.key, body: { text: request, messages: editChat.slice(0, -1), base: editProposal || undefined } })
-    if (r.reply && !r.proposed) { editChat[editChat.length - 1] = { role: 'ai', text: r.reply }; drawEditChat(); return } // the AI asks something
+    if (r.reply && !r.proposed) { // the AI asks something ("How much?"): keep the request; not understood: start clean
+      if (/did not get|cannot|never/i.test(r.reply)) pendingEdit = []
+      editChat[editChat.length - 1] = { role: 'ai', text: r.reply }; drawEditChat(); return
+    }
     pendingEdit = []; editProposal = r.proposed
     editChat[editChat.length - 1] = { role: 'ai', text: (r.diff || []).length ? 'Here is what would change. Apply it, or tell me what to adjust.' : 'Nothing would change.' }; drawEditChat()
     fill($('#edit-out'), proposal(current, r.proposed, r.diff || [], async () => {
@@ -306,6 +309,7 @@ $('#dev-chat-form').addEventListener('submit', async (e) => {
     const body = addProposal ? { base: addProposal, text: pendingAdd.join('. ') } : { messages: messages.slice(0, -1) }
     const r = await call(h.url + '/api/devices/chat', { key: h.key, body })
     messages[messages.length - 1] = { role: 'ai', text: r.reply || 'Here is my proposal.' }; drawChat()
+    if (!r.proposed && /did not get|cannot|never/i.test(r.reply || '')) pendingAdd = [] // not understood: start the next request clean
     if (r.proposed) {
       addProposal = r.proposed; pendingAdd = []
       fill($('#add-dev-out'), proposal(null, r.proposed, [], async () => {
