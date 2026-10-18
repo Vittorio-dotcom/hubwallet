@@ -184,7 +184,9 @@ function openDevice (d, from) {
 // "1.50 HUSD per coffee", or with options "Espresso 1.50 · Cappuccino 2.00"
 const priceLine = (d) => d.options?.length ? d.options.map((o) => `${o.name} ${money(o.price)}`).join(' · ') : `${money(d.price)} ${DOLLAR} per ${d.unit}`
 const optionsGroup = (d) => d.options?.length
-  ? el('div', { class: 'stack' }, el('h3', {}, 'Options'), el('div', { class: 'group' }, d.options.map((o) => el('div', { class: 'cell' }, el('span', { class: 'grow' }, o.name), el('span', { class: 'num' }, `${money(o.price)} ${DOLLAR}`)))))
+  ? el('div', { class: 'stack' }, el('h3', {}, 'Options'), el('div', { class: 'group' }, d.options.map((o) => el('div', { class: 'cell' },
+      el('div', { class: 'grow' }, el('div', { class: 'title' }, o.name), (o.minutes || o.from != null) ? el('div', { class: 'sub' }, [o.minutes ? `${o.minutes} min` : '', o.from != null ? `${o.from}:00–${o.to}:00` : ''].filter(Boolean).join(' · ')) : null),
+      el('span', { class: 'num' }, `${money(o.price)} ${DOLLAR}`)))))
   : null
 function renderDevice () {
   const d = current
@@ -202,7 +204,7 @@ function renderDevice () {
       (d.rules || []).length
         ? el('div', { class: 'group' }, d.rules.map((r, i) => el('div', { class: 'cell' }, el('span', { class: 'cell-icon gray' }, icon(ruleIcon(r), { size: 16 })), el('span', { class: 'grow' }, ruleText(r)), el('span', { class: 'value' }, `#${i + 1}`))))
         : el('p', { class: 'footnote' }, 'No rules yet. Ask below, for example “lock it after 22:00”.')))
-  fill($('#edit-suggest'), ['Price 3.50', 'Options: quick 2.00, normal 3.00', 'Lock it after 22:00', 'Unlock it at 7:00', 'Weekend +10%', 'Maintenance every 50 uses']
+  fill($('#edit-suggest'), ['Price 3.50', 'Options: 30° 2.00 40 min, 60° 3.50 90 min', 'Add cappuccino 2.00 7-11', 'Lock it after 22:00', 'Unlock it at 7:00', 'Weekend +10%', 'Maintenance every 50 uses']
     .map((t) => el('button', { type: 'button', on: { click: () => { $('#edit-text').value = t; $('#edit-text').focus() } } }, t)))
   fill($('#device-tools'),
     el('div', { class: 'group' },
