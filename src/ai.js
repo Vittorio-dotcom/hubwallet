@@ -290,6 +290,14 @@ export async function editDevice (text, current) {
   if (!current || typeof current !== 'object' || !current.id) throw new Error('Unknown device.')
   const { state, earned, ...cur } = current // runtime fields are not part of the config
   const rules = Array.isArray(cur.rules) ? cur.rules : []
+  // "prezzo 2,80" / "price 3" / "costa 2 euro": a plain new price, read by code (no model call)
+  const plain = String(text).trim().match(/^(?:set\s+)?(?:the\s+)?(?:price|prezzo|costo|costa|cost)\s*(?:to|a|:|=|is|è)?\s*(\d+(?:[.,]\d{1,2})?)\s*(?:€|eur|euro|\$|dollars?|husd)?\.?$/i)
+  if (plain) {
+    const x = Number(plain[1].replace(',', '.'))
+    if (x > 1000) return { reply: 'The highest price is 1000.00 dollars. Write a lower price.' }
+    if (x > 0 && x < 0.01) return { reply: 'The smallest price is 0.01 dollars (one cent).' }
+    return { proposed: { ...structuredClone(cur), price: Math.round(x * 100) } }
+  }
   const summary = [
     `Device: ${cur.name} (${cur.type}), price ${money(cur.price || 0)} dollars per ${cur.unit || 'use'}.`,
     `Commands: ${(cur.commands || []).join(', ') || 'none'}.`,
@@ -344,6 +352,7 @@ export async function editDevice (text, current) {
   for (const o of out.addRules || []) {
     try {
       const r = buildRule(o, text, next.price)
+      if (r.do.kind === 'set_price' && !['weekday', 'after_hour'].includes(r.when.kind)) continue // a price by day or hour only
       if ((r.do.kind === 'lock' || r.do.kind === 'unlock') && cur.type === 'access') continue // never lock a guest out
       // "lock it after 23" replaces "lock it after 22" (one lock time and one unlock time); prices per hour band add up
       const replaced = (x) => ['lock', 'unlock'].includes(r.do.kind) && r.when.kind === 'after_hour' && x.when.kind === 'after_hour' && x.do.kind === r.do.kind
