@@ -45,7 +45,6 @@ const EXAMPLE = {
     toSign: [],
     devices: [
       { id: 'washer', name: 'Washing machine', icon: 'washer', type: 'use', price: 300, unit: 'wash', commands: ['start', 'stop'], rules: [{ when: { kind: 'counter_at', value: 50 }, do: { kind: 'propose_purchase', reason: 'maintenance' } }], version: 1, state: { status: 'idle' }, earned: 900, uses: 3 },
-      { id: 'dryer', name: 'Dryer', icon: 'dryer', type: 'use', price: 200, unit: 'cycle', commands: ['start', 'stop'], rules: [{ when: { kind: 'after_hour', value: 22 }, do: { kind: 'lock' } }], version: 2, state: { status: 'running', until: Date.now() + 40 * 1000 }, earned: 400, uses: 2 }
     ] }]
 }
 const example = () => hubCfg.length === 0
