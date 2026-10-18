@@ -31,35 +31,53 @@ A home hub that lets a host sell or rent any shared service, with a local AI tha
 - **QVAC:** microphones and usage data stay inside the home. There is no cost per request for small hosts, and it works offline.
 - **Why not Stripe:** a fridge cannot open a Stripe account, and a card payment does not give the guest a key they own and can pass on.
 
-## Plan for the hackathon
+## What works (built during the hackathon)
 
-**Core (must work live):**
-1. The host issues a stay token on Mutinynet and sends it to the guest.
-2. The guest transfers it to the lock, the hub verifies the asset and the lock opens.
-3. The guest pays in USDT for a pay-per-use service (washing machine) and it starts.
-4. The guest rents a time-based service (bike) and the rental expires after the paid time.
+- **Hub** (`src/hub.js`, `src/hub-core.js`): one per place, with its own **watch-only RGB wallet** (no seed on the hub). It sells the services of its machines, creates RGB invoices, validates incoming payments client-side (rgb-lib) and starts the machine when the payment settles on Mutinynet. Every spend (e.g. moving earnings to the host) is prepared by the hub and **signed only by the host** with `src/signer.js`.
+- **Guest wallet** (`src/guest.js`): a self-custodial **Tether WDK** wallet (`wdk-wallet-rgb`). It decodes the hub's invoice itself, shows what it will pay, pays in our test dollar HUSD and keeps the hub's signed receipt.
+- **Machines with services** (`src/devices.js`): a washing machine with 30° / 40° / 60° washes, a coffee machine with espresso / cappuccino; each service has its price, its run time and the hours it is offered.
+- **Local AI (QVAC, Qwen3.5 2B)** (`src/ai.js`): the host adds a machine or changes it in plain language ("add a dryer, 2 dollars a cycle", "lock it after 22:00", "weekend +10%", "add a 60° wash for 3.50, 90 minutes"). The AI only proposes; **code validates every number** (a price is kept only if the host wrote it) and the host presses Apply. Requests about keys, guests' identities or moving money get a fixed answer from code, before any model call.
+- **Web apps** (`web/`): host app (desktop and phone), guest app (phone), device screen with QR.
 
-**AI layer:**
-5. The host creates services and behaviours in plain language (three templates).
-6. The guest asks for what they need and gets a bundle proposal to confirm.
-7. A behaviour proposes a purchase (minibar restock), the host approves and the hub pays the supplier in USDT.
+Every payment shown is a real RGB transfer on Mutinynet. The machines are simulated web pages.
 
-**Stretch:** voice, translation, consumption over Lightning, WDK wallet.
+## Run it
 
-**Honest scope note:** the devices are simulated as web pages (stretch goal: a microcontroller driving a real lock or LED). Every token transfer and payment is a real RGB transaction on Mutinynet, and the AI runs locally.
+Requirements: Linux x86_64, **Node 22**, network access to Mutinynet (`esplora.signet.kaleidoswap.com`, `proxy.kaleidoswap.com`).
 
-## Stack
+```bash
+npm install
+node src/signer.js init hub-demo            # host side, once: keeps the seed, writes data/hub-demo/hub-keys.json
+# the hub (watch-only). QVAC_* = the OpenAI-compatible server of `qvac serve --openai` (optional: without it the AI is off)
+QVAC_URL=http://<ai-pc>:11434 QVAC_API_KEY=<key> MINUTE_MS=1000 USE_MS=45000 \
+HUB_NAME=Laundry PORT=8080 WALLET=hub-demo DOLLAR_ASSET=<rgb:… asset id of the dollar> node src/hub.js
+PORT=8090 WALLET=guest-demo node src/guest.js     # the guest's wallet, localhost only
+node src/signer.js watch hub-demo http://localhost:8080   # the host approves spends here
+```
 
-- RGB Protocol on Bitcoin via the KaleidoSwap builder kit: RGB Lightning Node (kaleido-cli), kaleido-mcp, Mutinynet faucets.
-- QVAC through KaleidoMind (`@kaleidorg/mind` + `@qvac/sdk`), Qwen3.5 2B, with a custom `device-access` skill.
-- Web interfaces for the guest, the host and the devices.
-- WDK: optional stretch goal.
+- Host app: `http://localhost:8080/host.html` → "Add a hub": `http://localhost:8080` + the owner key printed by the hub (`data/hub-demo/owner-key.txt`, never committed).
+- Guest app: `http://localhost:8090/guest.html` → "Connect a hub", or open `guest.html?hubs=<hub url>`.
+- `MINUTE_MS=1000` makes one service minute last one second (a 30 min wash runs 30 s in the demo).
+- Wallets need sats for fees and free UTXOs: the guest app offers "Prepare my wallet", and the wallet creates UTXOs itself when it runs out.
+- Phone demo: the guest wallet behind a password tunnel (Pinggy, `b:user:pass`) and the hub behind a Cloudflare quick tunnel; the guest opens `<wallet tunnel>/guest.html?hubs=<hub tunnel>`.
 
-Third-party tooling and any forks will be listed here as we use them.
+## Demo
+
+1. Host (desktop): add the **Laundry** hub; it has a washing machine with 30° / 40° / 60° washes.
+2. Host: "Add a machine" → tell the AI "a dryer, 2 dollars per cycle" → Add.
+3. While the guest app picks it up: on the washing machine ask the AI for rules ("lock it after 22:00", "weekend +10%") → Apply.
+4. Guest (phone): the dryer appears → Pay → the wallet shows what it checked → Confirm. About a minute later (one Bitcoin block) the hub says "paid" and the dryer starts; the receipt is signed by the hub.
+
+## Stack (as built)
+
+- RGB on Bitcoin (Mutinynet, rgb-lib `signet`) through UTEXO `rgb-sdk` / `@utexo/rgb-lib` 0.3; our own NIA test dollar **HUSD** (precision 2).
+- Tether **WDK** `@utexo/wdk-wallet-rgb` for the guest and host wallets; watch-only rgb-sdk wallet + external PSBT signing for the hub.
+- **QVAC** local AI (`qvac serve --openai`, Qwen3.5 2B) on a team member's PC, JSON schema output.
+- Node 22 + Express, plain HTML/CSS/JS pages. Performance notes: `docs/PERF.md`.
 
 ## Work done before the hackathon
 
-No product code. Before the event we studied the documentation and tutorials, set up the development environment and planned the idea. To explain the idea to the team we made a clickable UI mockup (a single HTML page with simulated data, no RGB and no AI). If we reuse any of its layout, we will say so in the commit. All RGB and QVAC integration will be written during the hackathon, with dated commits.
+No product code in this repository. Before the event we ran a feasibility test of WDK on Mutinynet (issue a test asset and transfer it between two wallets, outside this repo), studied the documentation and tutorials, set up the development environment and planned the idea. To explain the idea to the team we made a clickable UI mockup (a single HTML page with simulated data, no RGB and no AI). If we reuse any of its layout, we will say so in the commit. All RGB and QVAC integration will be written during the hackathon, with dated commits.
 
 ## Vision (beyond the hackathon)
 
