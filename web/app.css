@@ -387,6 +387,8 @@ html, body { background: var(--glass-page-bg) }
   .devices { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px }
   .device-card { min-height: 160px; padding: 14px }
   .device-card.add { display: none }                     /* same action as "Add a machine" in the AI tools below */
+  .device-card > .row:first-child { flex-wrap: wrap; row-gap: 8px } /* the status badge goes under the porthole: both do not fit in ~170 px */
+  .device-card > .row:first-child > .grow { display: none }
 }
 
 
