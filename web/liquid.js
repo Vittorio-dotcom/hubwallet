@@ -5,6 +5,8 @@
 // - droplets: tab and segmented-control indicators slide and stretch like a drop of liquid; page dots merge (goo filter)
 // Respects prefers-reduced-motion (no morphing, no stretching; light and colour stay).
 
+import { refract } from './refraction.js'
+
 const reduced = () => matchMedia('(prefers-reduced-motion: reduce)').matches
 const SPRING = 'linear(0, 0.009, 0.035 2.1%, 0.141, 0.281 6.7%, 0.723 12.9%, 0.938 16.7%, 1.017, 1.077, 1.121, 1.149 24.3%, 1.159, 1.163, 1.161, 1.154 29.9%, 1.129 32.8%, 1.051 39.6%, 1.017 43.1%, 0.991, 0.977 51%, 0.974 53.8%, 0.975 57.1%, 0.997 69.8%, 1.003 76.9%, 1.004 83.8%, 1)'
 const LIGHT = '.group, .overview, .device-card, .confirm, .proposal, .screen-pay, .composer, .sign-banner, .pass, .topbar, .tabbar, .icon-btn, .btn, .seg, .suggest button'
@@ -20,6 +22,12 @@ export function liquid () {
   svg.setAttribute('width', '0'); svg.setAttribute('height', '0'); svg.setAttribute('aria-hidden', 'true'); svg.style.position = 'absolute'
   svg.innerHTML = '<filter id="goo"><feGaussianBlur in="SourceGraphic" stdDeviation="1.4" result="b"/><feColorMatrix in="b" mode="matrix" values="1 0 0 0 0  0 1 0 0 0  0 0 1 0 0  0 0 0 16 -6"/></filter>'
   document.body.append(svg)
+
+  // refraction on every full-tier glass surface (cards, panels, bars, round controls); chips stay CSS-only
+  const GLASS = '.topbar, .tabbar, .pass, .group, .overview, .device-card, .confirm, .proposal, .screen-pay, .composer, .icon-btn, .sheet-panel'
+  const scan = (root) => { if (root.matches?.(GLASS)) refract(root); root.querySelectorAll?.(GLASS).forEach((n) => refract(n)) }
+  scan(document.body)
+  new MutationObserver((list) => list.forEach((m) => m.addedNodes.forEach((n) => n.nodeType === 1 && scan(n)))).observe(document.body, { childList: true, subtree: true })
 
   let lit = null
   document.addEventListener('pointermove', (e) => {
