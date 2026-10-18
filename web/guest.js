@@ -91,7 +91,9 @@ const priceText = (s) => s.type === 'access' ? 'Opens with your key'
     : `${money(s.price)} ${DOLLAR} per ${per(s)}`
 // the option picked on a machine with options (espresso / cappuccino); the first one until the guest picks
 let choice = null
-const optionOf = (s) => s.options?.length ? (s.options.find((o) => o.id === choice) || s.options[0]) : null
+const optionOf = (s) => s.options?.length ? (s.options.find((o) => o.id === choice && o.open !== false) || s.options.find((o) => o.open !== false) || s.options[0]) : null
+const optionHours = (o) => o.from != null ? `${o.from}:00–${o.to}:00` : ''
+const optionLabel = (o) => [o.name, money(o.price), o.minutes ? `${o.minutes} min` : '', o.open === false ? optionHours(o) : ''].filter(Boolean).join(' · ')
 const stateText = (s) => {
   const st = statusOf(s)
   if (s.type === 'access') return st.key === 'busy' ? 'Open' : 'Locked'
@@ -326,15 +328,16 @@ function renderDevice (h, s) {
       el('div', { class: 'stack', style: 'align-items:center;gap:6px' }, badge(s), el('span', { class: 'footnote' }, `${KIND[s.type]} at ${h.name}`))),
     s.type === 'access' ? null : el('div', { class: 'stack', style: 'align-items:center;gap:4px' },
       el('div', { class: 'price-big' }, money(amount), el('small', {}, DOLLAR)),
-      el('span', { class: 'footnote' }, opt ? opt.name : s.type === 'rent' ? `${money(s.price)} per hour` : `for one ${per(s)}`)),
+      el('span', { class: 'footnote' }, opt ? [opt.name, opt.minutes ? `runs ${opt.minutes} min` : '', opt.from != null ? `offered ${optionHours(opt)}` : ''].filter(Boolean).join(' · ') : s.type === 'rent' ? `${money(s.price)} per hour` : `for one ${per(s)}`)),
     opt ? el('div', { class: 'seg', role: 'group', 'aria-label': 'Choose' },
-      s.options.map((o) => el('button', { type: 'button', 'aria-pressed': String(o.id === opt.id), on: { click: () => { choice = o.id; renderDevice(h, s) } } }, `${o.name} · ${money(o.price)}`))) : null,
+      s.options.map((o) => el('button', { type: 'button', 'aria-pressed': String(o.id === opt.id), disabled: o.open === false, title: o.open === false ? `Offered ${optionHours(o)}` : undefined, on: { click: () => { choice = o.id; renderDevice(h, s) } } }, optionLabel(o)))) : null,
+    opt && opt.open === false ? notice('info', `Right now none of these is offered. ${s.options.map((o) => `${o.name}: ${optionHours(o)}`).join(' · ')}`) : null,
     s.type === 'rent' ? el('div', { class: 'seg', role: 'group', 'aria-label': 'Hours' },
       Array.from({ length: s.maxHours || 4 }, (_, i) => el('button', { type: 'button', 'aria-pressed': String(hours === i + 1), on: { click: () => { hours = i + 1; renderDevice(h, s) } } }, `${i + 1} h`))) : null,
     st.key === 'busy' ? notice('info', `In use right now. Free in ${clock(st.until)}.`) : null,
     st.key === 'locked' ? notice('warn', 'Locked right now by the owner, for example during quiet hours.') : null,
     s.type === 'access' ? notice('info', 'This opens with your key, nothing to pay.') : null,
-    w ? el('button', { class: 'btn pay block', type: 'button', disabled: !canPay, on: { click: () => pay(h, s) } }, icon('wallet', { size: 20 }), `Pay ${money(amount)} ${DOLLAR}`)
+    w ? el('button', { class: 'btn pay block', type: 'button', disabled: !canPay || opt?.open === false, on: { click: () => pay(h, s) } }, icon('wallet', { size: 20 }), `Pay ${money(amount)} ${DOLLAR}`)
       : el('button', { class: 'btn primary block', type: 'button', on: { click: () => show('connect') } }, 'Add a wallet to pay'),
     w ? el('p', { class: 'footnote', style: 'text-align:center' }, `From ${w.label}. Your wallet checks the price before anything is sent.`) : null)
 }
