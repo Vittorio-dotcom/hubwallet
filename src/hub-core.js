@@ -50,14 +50,15 @@ export class Hub extends EventEmitter {
   // PSBT older than this expires and its inputs are released.
   // pollMs: FALLBACK interval, used only while something is open (default 2 min).
   //
-  // Why no fixed fast polling: a rgb-lib refresh syncs with the indexer and is SYNCHRONOUS,
-  // so while it runs (up to ~30 s on a wallet with history) this process answers nothing.
-  // So the hub refreshes only when there is a reason:
-  //   - nothing open                 → no refresh at all (pages stay instant)
-  //   - a payer claim arrives        → burst: now (consignment, ACK), then +35 s, +70 s, +120 s (the block)
-  //   - the signer signed a spend    → same burst (receiver's ACK → broadcast → block)
+  // rgb-lib is SYNCHRONOUS: while it works this process answers nothing. A refresh costs
+  // ~0.5–1 s (rgb-lib logs); the expensive part was the balance reads, which re-synced with the
+  // indexer every time (10–25 s) and now read the local database (docs/PERF.md). So:
+  //   - nothing open                 → no refresh at all
+  //   - a payer claim arrives        → burst: refresh every 5 s until the payment settles (max 3 min),
+  //                                    so "paid" shows ~5 s after the block instead of up to +50 s
+  //   - the signer signed a spend    → burst for the full 3 min (receiver's ACK → broadcast → block)
+  //   - end of a burst, start-up, manual refresh → one indexer sync (bitcoin balance, UTXOs)
   //   - open payment without a claim → fallback every pollMs (an anonymous payer still gets seen)
-  // Blocks come every ~30 s on average: after 35 s ~69% of the time, after 70 s ~90%, after 120 s ~98%.
   constructor ({ name, walletName, root = process.env.DATA_DIR || 'data', pollMs = 120_000, signTimeoutMs = 10 * 60_000 }) {
     super()
     this.name = name
@@ -66,7 +67,10 @@ export class Hub extends EventEmitter {
     this.signTimeoutMs = signTimeoutMs
     this.polling = false
     this.followUntil = 0 // a burst is running until this time
-    this.walletCache = null // { at, data }: GET /api/wallet also syncs, so cache it
+    this.followSpend = 0 // a signed spend is followed until this time (nothing in payments tells us it settled)
+    this.burstTimer = null
+    this.syncTimer = null
+    this.walletCache = null // { at, data }: short copy for pages polling GET /api/wallet
   }
 
   async open () {
@@ -91,25 +95,57 @@ export class Hub extends EventEmitter {
 
   save () { fs.writeFileSync(this.stateFile, JSON.stringify(this.state, null, 1), { mode: 0o600 }) }
 
-  // One refresh at start-up (to catch up), then only bursts and the fallback.
+  // One refresh and one sync at start-up (to catch up), then only bursts and the fallback.
   start () {
     this.timer = setInterval(() => { if (this.busy()) this.poll() }, this.pollMs)
-    this.poll()
+    this.poll().then(() => this.syncWallet())
     return this
   }
-  stop () { clearInterval(this.timer); this.followUntil = 0 }
+  stop () { clearInterval(this.timer); clearTimeout(this.burstTimer); clearTimeout(this.syncTimer); this.burstTimer = null; this.followUntil = 0 }
+
+  // Indexer sync: bitcoin balance and UTXOs. Blocking (10–25 s), so only at quiet moments.
+  // At most one at a time and one per minute (manual refreshes may come in a row).
+  // force: before preparing a spend, rgb-lib must see our real UTXOs (it picks inputs and change from its local view).
+  syncWallet ({ force = false } = {}) {
+    if (this.syncing) return this.syncing
+    if (!force && Date.now() - (this.lastSync || 0) < 60_000) return Promise.resolve()
+    this.syncing = (async () => {
+      try {
+        const err = await this.wallet.sync()
+        if (err) console.error('sync:', err)
+      } finally { this.syncing = null; this.lastSync = Date.now(); this.walletCache = null }
+    })()
+    return this.syncing
+  }
 
   // Is there anything the watcher must look at?
   busy () {
     return Date.now() < this.followUntil || this.state.payments.some((p) => OPEN.includes(p.status))
   }
 
-  // A few targeted refreshes after an event we know about (claim received, spend signed).
-  burst (reason) {
-    const delays = [0, 35_000, 70_000, 120_000]
-    this.followUntil = Math.max(this.followUntil, Date.now() + delays[delays.length - 1] + 5_000)
-    for (const d of delays) setTimeout(() => this.poll(), d)
-    console.log(`[watch] ${reason}: refresh now, +35 s, +70 s, +120 s`)
+  // Refresh every 5 s after an event we know about (claim received, spend signed), until
+  // nothing is open any more (or 3 min), then one sync for the bitcoin balance.
+  burst (reason, { spend = false } = {}) {
+    const until = Date.now() + 180_000
+    this.followUntil = Math.max(this.followUntil, until)
+    if (spend) this.followSpend = Math.max(this.followSpend, until)
+    console.log(`[watch] ${reason}: refresh every 5 s until settled (max 3 min)`)
+    clearTimeout(this.syncTimer) // a sync was waiting: it runs at the end of this burst instead
+    if (this.burstTimer) return // already running: it now goes on until the new deadline
+    const tick = async () => {
+      await this.poll()
+      const now = Date.now()
+      const open = this.state.payments.some((p) => OPEN.includes(p.status) && p.claim)
+      if (now < this.followUntil && (open || now < this.followSpend)) {
+        this.burstTimer = setTimeout(tick, 5_000)
+      } else {
+        // Sync 20 s later: it freezes the hub for 10–25 s, and pages first need to read "paid".
+        this.followUntil = 0
+        this.burstTimer = null
+        this.syncTimer = setTimeout(() => this.syncWallet(), 20_000)
+      }
+    }
+    this.burstTimer = setTimeout(tick, 0)
   }
 
   info () { return { name: this.name, network: 'signet (Mutinynet)', hubKey: this.hubKey } }
@@ -189,7 +225,8 @@ export class Hub extends EventEmitter {
     this.walletCache = null
     try {
       // 1. Download consignments, validate them, update confirmations.
-      const err = await this.wallet.refresh()
+      // Fast refresh (no sync inside rgb-lib) while only incoming payments are followed.
+      const err = await this.wallet.refresh({ fast: Date.now() >= this.followSpend })
       if (err) console.error('refresh:', err)
 
       // 2. Match every open payment with the transfer rgb-lib has for its recipientId.
@@ -238,8 +275,11 @@ export class Hub extends EventEmitter {
           // (failTransfers without an index would fail every open invoice).
           await this.wallet.cancel(p.batchTransferIdx).catch(() => {})
           this.setStatus(p, 'expired')
+        } else if (st === 'WaitingCounterparty') {
+          // rgb-lib also calls an invoice nobody has paid yet WaitingCounterparty: keep 'waiting',
+          // or payers (src/guest.js check) refuse a request that is still payable.
         } else {
-          this.setStatus(p, st, { txid: found.txid || p.txid }) // WaitingCounterparty / WaitingConfirmations
+          this.setStatus(p, st, { txid: found.txid || p.txid }) // WaitingConfirmations
         }
       }
 
@@ -337,6 +377,7 @@ export class Hub extends EventEmitter {
     if (asked && asked !== amount) throw new Error(`The invoice asks for ${asked}, not ${amount}.`)
     if (inv.expirationTimestamp && inv.expirationTimestamp * 1000 < Date.now()) throw new Error('The invoice has expired.')
 
+    await this.syncWallet({ force: true })
     const { psbt, batchTransferIdx } = await this.wallet.prepareSend({ assetId, amount, invoice })
     return this.addToSign({ kind: 'send', description, assetId, amount, invoice, recipientId: inv.recipientId, psbt, batchTransferIdx })
   }
@@ -346,6 +387,7 @@ export class Hub extends EventEmitter {
     const busy = this.pendingItem()
     if (busy) throw new Error(`Another operation is waiting for the signature (${busy.id}). Sign or reject it first.`)
     num = Math.min(Math.max(1, Math.round(Number(num) || 5)), 20)
+    await this.syncWallet({ force: true })
     const { psbt } = await this.wallet.prepareUtxos({ num })
     return this.addToSign({ kind: 'utxos', description: `Create up to ${num} colorable UTXOs`, psbt })
   }
@@ -376,7 +418,7 @@ export class Hub extends EventEmitter {
       this.walletCache = null
       this.setSignStatus(item, 'signed', { txid: r.txid, created: r.created, signedAt: Date.now() })
       // A send waits for the receiver's ACK before rgb-lib broadcasts it, then for the block.
-      this.burst(`${item.kind} ${item.id} signed`)
+      this.burst(`${item.kind} ${item.id} signed`, { spend: true })
       return this.signView(item)
     } catch (e) {
       // Wrong or tampered PSBT, or broadcast failure: release the inputs.
@@ -411,8 +453,8 @@ export class Hub extends EventEmitter {
     return a
   }
 
-  // Balance and UTXOs sync with the indexer (blocking), so pages polling this route get a
-  // copy at most 30 s old; `fresh` forces a new read. Every watcher round clears the copy.
+  // Balance and UTXOs come from the local database (ms); the indexer sync happens in
+  // syncWallet(). The 30 s copy only saves work for pages polling this route; `fresh` re-reads.
   async walletView ({ fresh = false } = {}) {
     if (!fresh && this.walletCache && Date.now() - this.walletCache.at < 30_000) return this.walletCache.data
     const [bal, utxos] = await Promise.all([this.wallet.balance(), this.wallet.unspents()])
@@ -453,7 +495,7 @@ export class Hub extends EventEmitter {
     r.post('/to-sign/:id/reject', owner, wrap((req) => this.reject(req.params.id)))
     r.get('/trace', owner, wrap((req) => this.trace.list({ ref: req.query.ref, limit: Number(req.query.limit) || 200 })))
     r.get('/trace/verify', owner, wrap(() => this.trace.verify()))
-    r.post('/refresh', owner, wrap(async () => { await this.poll(); return { ok: true } })) // manual: always refreshes
+    r.post('/refresh', owner, wrap(async () => { await this.poll(); await this.syncWallet(); return { ok: true } })) // manual: refresh + sync
     return r
   }
 }

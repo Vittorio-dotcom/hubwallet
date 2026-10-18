@@ -31,11 +31,13 @@ const trace = new Trace(path.join(wallet.dir, 'trace.jsonl'))
 const proofsDir = path.join(wallet.dir, 'proofs')
 
 // ---------- when to refresh ----------
-// A rgb-lib refresh syncs with the indexer and is SYNCHRONOUS: while it runs (up to ~30 s on a
-// wallet with history) this server answers nothing, not even static files. So no fixed polling:
-//   - after this wallet pays → burst: +10 s (read the receiver's ACK, broadcast), +35 s, +70 s, +120 s (the block)
-//   - a transfer still in progress (cheap local check) → fallback every 2 min
-//   - nothing in progress → no refresh (pages stay instant); POST /api/refresh still works by hand
+// rgb-lib is SYNCHRONOUS: while it works this server answers nothing, not even static files.
+// A refresh costs ~1 s; an indexer sync 10–25 s. Balance reads use the local database (src/wallet.js),
+// so the sync runs only when bitcoin may have moved (docs/PERF.md):
+//   - start-up → one sync
+//   - after this wallet pays → burst: refresh at +10 s (read the receiver's ACK, broadcast), +35 s, +70 s, +120 s (the block), then one sync
+//   - a transfer still in progress (cheap local check) → fallback refresh every 2 min
+//   - nothing in progress → nothing; POST /api/refresh (refresh + sync) still works by hand
 const FALLBACK_MS = Math.max(30_000, Number(process.env.WALLET_POLL_MS || 120_000))
 let refreshing = false
 let balanceCache = null // { at, data }: /api/me also syncs, so pages get a copy at most 30 s old
@@ -44,9 +46,51 @@ async function refreshNow () {
   refreshing = true
   try { await wallet.refresh() } finally { refreshing = false; balanceCache = null }
 }
+// At most one sync at a time and one per minute: pages may ask /api/refresh every few seconds,
+// and each sync freezes this server for 10–50 s (more when the indexer is slow).
+// force: skip the one-per-minute limit (a send just failed on an old view of our UTXOs).
+let syncing = null // the running sync, so callers can wait for it
+let lastSync = 0
+function syncNow ({ force = false } = {}) {
+  if (syncing) return syncing
+  if (!force && Date.now() - lastSync < 60_000) return Promise.resolve()
+  syncing = (async () => {
+    try {
+      const err = await wallet.sync()
+      if (err) console.error('sync:', err)
+    } finally { syncing = null; lastSync = Date.now(); balanceCache = null }
+  })()
+  return syncing
+}
+
+// rgb-lib picks inputs and change from its local view of our UTXOs, which is only as fresh as the
+// last sync (we no longer sync on every balance read). If it finds no room or no bitcoin, that view
+// may just be old: sync once and try again. "Dollars still settling" also gets a refresh first.
+// The sync can take a minute: `recheck` runs again before the retry (invoice not expired, request
+// still unpaid and unchanged), and throws if paying is no longer right.
+const STALE = /InsufficientAllocationSlots|InsufficientBitcoins|InsufficientAssignments/
+async function sendFresh (args, recheck = async () => {}) {
+  try { return await wallet.send(args) } catch (e) {
+    if (!STALE.test(String(e.message || e))) throw e
+    console.log(`[send] ${String(e.message || e)}: sync and retry once`)
+    await refreshNow()
+    await syncNow({ force: true })
+    await recheck()
+    try { return await wallet.send(args) } catch (e2) {
+      // really no free UTXO for the change: create some now (one small Bitcoin tx), the guest retries after the block
+      if (!/InsufficientAllocationSlots/.test(String(e2.message || e2))) throw e2
+      const made = await wallet.createUtxos(5).then(() => true, () => false)
+      balanceCache = null
+      throw new Error(made
+        ? 'Your wallet just prepared room for dollars (a small Bitcoin transaction). Nothing was paid: try again in about a minute.'
+        : String(e2.message || e2))
+    }
+  }
+}
 function burst (reason) {
   for (const d of [10_000, 35_000, 70_000, 120_000]) setTimeout(() => refreshNow(), d)
-  console.log(`[watch] ${reason}: refresh at +10 s, +35 s, +70 s, +120 s`)
+  setTimeout(() => syncNow(), 125_000)
+  console.log(`[watch] ${reason}: refresh at +10 s, +35 s, +70 s, +120 s, then sync`)
 }
 // listTransfers reads the local database only (no sync), so this check is instant.
 async function inProgress () {
@@ -66,11 +110,15 @@ function payerKeyFor (hubKey) {
 async function hubApi (hubUrl, route, body) {
   const base = String(hubUrl || '').replace(/\/+$/, '')
   if (!/^https?:\/\/[^\s/]+/.test(base)) throw new Error('hubUrl must be http(s)://host:port')
-  const res = await fetch(base + '/api' + route, {
+  const call = () => fetch(base + '/api' + route, {
     method: body ? 'POST' : 'GET',
     headers: { 'Content-Type': 'application/json' },
     body: body ? JSON.stringify(body) : undefined
   })
+  // After rgb-lib froze this process (a sync can take a minute), the kept-alive socket to the hub
+  // may be closed on the other side: the first fetch then fails with "fetch failed". Retry once.
+  let res
+  try { res = await call() } catch { res = await call() }
   const data = await res.json().catch(() => ({}))
   if (!res.ok) throw new Error(data.error || `Hub answered HTTP ${res.status}`)
   return data
@@ -138,7 +186,8 @@ app.post('/api/pay-request', wrap(async (req) => {
   const { hubUrl, paymentId, expect, anonymous = false } = req.body || {}
   if (!expect) throw new Error('expect { assetId, amount } is required: pass what the user confirmed.')
   const c = await check(hubUrl, paymentId, expect)
-  const sent = await wallet.send({ assetId: c.assetId, amount: c.amount, invoice: c.invoice }) // WDK signs here
+  const sent = await sendFresh({ assetId: c.assetId, amount: c.amount, invoice: c.invoice }, // WDK signs here
+    async () => { const again = await check(hubUrl, paymentId, expect); if (again.invoice !== c.invoice) throw new Error('The request changed while your wallet was syncing. Nothing was paid.') })
   balanceCache = null // the wallet changed: next /api/me reads it again
   let payerTag = null
   let claimError
@@ -175,14 +224,16 @@ app.post('/api/pay', wrap(async (req) => {
   if (!String(invoice || '').startsWith('rgb:')) throw new Error('invoice must be an RGB invoice (rgb:...).')
   const inv = await wallet.decodeInvoice(invoice)
   if (inv.assetId && inv.assetId !== assetId) throw new Error('The invoice asks for a different asset.')
-  const r = await wallet.send({ invoice, assetId, amount: Number(amount) })
+  const notExpired = () => { if (inv.expirationTimestamp && inv.expirationTimestamp * 1000 < Date.now()) throw new Error('The invoice has expired.') }
+  notExpired()
+  const r = await sendFresh({ invoice, assetId, amount: Number(amount) }, async () => notExpired())
   balanceCache = null
   trace.append('pay.sent', inv.recipientId, { assetId, amount: Number(amount), txid: r.txid, description: String(description).slice(0, 200) })
   burst(`paid ${inv.recipientId}`)
   return { ...r, link: r.txid ? EXPLORER + r.txid : undefined }
 }))
 
-app.post('/api/refresh', wrap(async () => { await refreshNow(); return { ok: true } })) // manual: always refreshes
+app.post('/api/refresh', wrap(async () => { await refreshNow(); await syncNow(); return { ok: true } })) // manual: refresh + sync
 app.post('/api/utxos', wrap(async (req) => { const created = await wallet.createUtxos(Number(req.body?.num || 5)); balanceCache = null; return { created } }))
 app.get('/api/transfers', wrap((req) => wallet.transfers(req.query.assetId)))
 app.get('/api/trace', wrap(() => trace.list()))
@@ -190,3 +241,4 @@ app.get('/api/trace/verify', wrap(() => trace.verify()))
 
 setInterval(async () => { if (await inProgress()) refreshNow() }, FALLBACK_MS) // only while a transfer is in progress
 app.listen(PORT, HOST, () => console.log(`Wallet ${WALLET} on http://${HOST}:${PORT}`))
+syncNow() // catch up once at start-up

@@ -3,7 +3,8 @@
 //   /api/transfers, /api/proof), kept on this device. Swiping the wallet pass changes the active wallet; payments use it.
 // - Hubs: public API (/api/services, /api/services/:id/order, /api/payments/:id). A hub is added only after the guest
 //   confirms it (search field or QR link), and can be used from a distance.
-// - If no hub answers, example devices are shown, marked "Example data".
+// - Example devices only with the example wallet ("Try with an example wallet"), marked "Example data".
+//   Otherwise no hub = an empty list that says so, and a hub that does not answer is named.
 import { el, fill, money, DOLLAR, icon, porthole, statusOf, clock, themeButton, lens } from './ui.js'
 import { liquid, morphTopbar, droplet, tabbar, morphOpen, morphClose } from './liquid.js'
 
@@ -49,6 +50,12 @@ let hubUrls = load_('hubUrls', [])
 let offered = (new URLSearchParams(location.search).get('hubs') || '').split(',').map(normUrl).filter((u) => u && !hubUrls.includes(u))
 const walletData = {} // url → { me, transfers, ok }
 let hubs = []; let demoHubs = false; let busy = false; let query = ''
+let silentHubs = [] // connected hubs that did not answer the last refresh
+// Payments sent and still followed (or just finished, until the guest has seen the result):
+// [{ hubUrl, serviceId, name, paymentId, amount, link, at, step, msg, cls, done }]
+let pending = load_('pending', []).filter((p) => Date.now() - p.at < 30 * 60_000)
+const pendingFor = (h, s) => pending.find((p) => p.hubUrl === h.url && p.serviceId === s.id)
+const savePending = () => save_('pending', pending)
 
 const current = () => wallets[active]
 const data = () => walletData[current()?.url] || null
@@ -67,7 +74,8 @@ async function loadWallet (w) {
 async function loadHubs () {
   const found = []
   for (const url of hubUrls) { try { const h = await api(url + '/api/services'); found.push({ url, name: h.name, services: h.services || [] }) } catch {} }
-  demoHubs = found.length === 0
+  silentHubs = hubUrls.filter((u) => !found.some((h) => h.url === u))
+  demoHubs = found.length === 0 && current()?.url === EXAMPLE_WALLET // fake machines only for the fake wallet
   hubs = demoHubs ? EXAMPLE.hubs : found
 }
 async function refresh () {
@@ -93,7 +101,12 @@ const stateText = (s) => {
   if (st.key === 'locked') return 'Locked now'
   return 'Available'
 }
-const badge = (s) => el('span', { class: `badge ${statusOf(s).key}` }, stateText(s))
+const badge = (s, h) => {
+  const p = h && pendingFor(h, s)
+  if (p && !p.done) return el('span', { class: 'badge busy' }, 'Your payment · confirming')
+  if (p?.done) return el('span', { class: `badge ${p.cls === 'ok' ? 'free' : 'locked'}` }, p.cls === 'ok' ? 'Paid · tap to see' : 'Payment problem · tap')
+  return el('span', { class: `badge ${statusOf(s).key}` }, stateText(s))
+}
 const canOrder = (s) => s.type !== 'access' && statusOf(s).key === 'free'
 
 // ---------- rendering ----------
@@ -146,11 +159,14 @@ function render () {
   fill($('#devices'), items.length
     ? el('div', { class: 'group arts' }, items.map(({ h, s }) => el('button', { class: 'cell', type: 'button', on: { click: (e) => openDevice(h, s, e.currentTarget) }, 'aria-label': `${s.name}, ${priceText(s)}, ${stateText(s)}` },
         porthole(s, { size: 48 }),
-        el('div', { class: 'grow stack', style: 'gap:4px' }, el('div', { class: 'title' }, s.name), el('div', { class: 'sub' }, many ? `${priceText(s)} · ${h.name}` : priceText(s)), el('div', {}, badge(s))),
+        el('div', { class: 'grow stack', style: 'gap:4px' }, el('div', { class: 'title' }, s.name), el('div', { class: 'sub' }, many ? `${priceText(s)} · ${h.name}` : priceText(s)), el('div', {}, badge(s, h))),
         el('span', { class: 'chev' }, icon('chevronRight', { size: 18 })))))
-    : el('div', { class: 'group' }, el('div', { class: 'empty' }, icon('search', { size: 32 }),
-        el('h3', {}, q ? 'No machine matches' : 'No hub connected'),
-        el('p', { class: 'footnote' }, q ? 'Try another name.' : 'Scan the code on a machine, or connect a hub below.'))))
+    : el('div', { class: 'group' }, el('div', { class: 'empty' }, icon(silentHubs.length && !q ? 'alert' : 'search', { size: 32 }),
+        el('h3', {}, q ? 'No machine matches' : silentHubs.length ? 'The hub does not answer' : 'No hub connected'),
+        el('p', { class: 'footnote' }, q ? 'Try another name.'
+          : silentHubs.length ? `No answer from ${silentHubs.join(', ')}. It may be off, or busy for a few seconds. Try again.`
+            : 'Scan the code on a machine, or connect a hub below.'),
+        silentHubs.length && !q ? el('button', { class: 'btn small', type: 'button', on: { click: refresh } }, 'Try again') : null)))
 
   // wallet sheet (active wallet)
   const d = data()
@@ -291,13 +307,22 @@ const notice = (kind, text, ...extra) => el('div', { class: `notice ${kind}` }, 
 // ---------- a machine: details → pay with the active wallet → follow ----------
 let hours = 1
 let openDev = null
-function openDevice (h, s, from) { openDev = { h, s }; hours = 1; $('#dev-title').textContent = s.name; $('#track').hidden = true; $('#dev-body').hidden = false; fill($('#track-msg')); renderDevice(h, s); show('device', from) }
+function openDevice (h, s, from) {
+  openDev = { h, s }; hours = 1; $('#dev-title').textContent = s.name; $('#track').hidden = true; $('#dev-body').hidden = false; fill($('#track-msg'))
+  renderDevice(h, s)
+  const p = pendingFor(h, s)
+  if (p) {
+    track(p.step, p.msg, p.cls, p.link)
+    if (p.done) { pending = pending.filter((x) => x !== p); savePending(); render() } // result seen: forget it
+  }
+  show('device', from)
+}
 function renderDevice (h, s) {
   const st = statusOf(s)
   const opt = optionOf(s)
   const amount = opt ? opt.price : s.type === 'rent' ? s.price * hours : s.price
   const w = current()
-  const canPay = !busy && !!w && canOrder(s)
+  const canPay = !busy && !!w && canOrder(s) && !pendingFor(h, s)
   fill($('#dev-body'),
     el('div', { class: 'device-hero' }, porthole(s, { size: 132 }),
       el('div', { class: 'stack', style: 'align-items:center;gap:6px' }, badge(s), el('span', { class: 'footnote' }, `${KIND[s.type]} at ${h.name}`))),
@@ -352,10 +377,11 @@ async function prepareWallet () {
 }
 async function pay (h, s) {
   busy = true; renderDevice(h, s)
+  let entry = null // stored as soon as the wallet starts paying, so closing the screen loses nothing
   try {
     if (demoHubs || current().url === EXAMPLE_WALLET) { // example mode: show the steps, move nothing
       for (let i = 0; i <= 3; i++) { track(i, 'Example data: nothing is really paid.'); await new Promise((r) => setTimeout(r, 900)) }
-      track(4, `${s.name} started`, 'ok'); return
+      track(3, `Example only: nothing was paid and the ${s.name.toLowerCase()} did not start. Swipe to your real wallet (not "Example") to pay.`, 'warn'); return
     }
     track(0, 'Asking the machine for its price…')
     const opt = optionOf(s)
@@ -369,25 +395,30 @@ async function pay (h, s) {
     const ok = await confirmPay(c, h)
     if (!ok) { track(0, 'Payment cancelled. Nothing was paid.'); return }
     track(1, `Paying ${money(c.amount)} ${DOLLAR}…`)
-    // 4. pay exactly what was confirmed
+    entry = { hubUrl: h.url, serviceId: s.id, name: s.name, paymentId, amount: c.amount, wallet: current().url, at: Date.now(), step: 1, msg: `Your wallet is paying ${money(c.amount)} ${DOLLAR}…`, cls: 'info' }
+    pending = pending.filter((x) => !(x.hubUrl === h.url && x.serviceId === s.id)).concat(entry)
+    savePending(); render() // the list already says "Your payment" if the guest closes this screen now
+    // 4. pay exactly what was confirmed (can take a minute when the wallet has to sync first)
     const paid = await walletApi('/api/pay-request', { hubUrl: h.url, paymentId, expect: { assetId: c.assetId, amount: c.amount } })
-    track(2, 'Sent. The machine starts as soon as Bitcoin confirms it.', 'info', paid.link)
-    // 5. follow the hub's public payment record
-    for (let i = 0; i < 60; i++) {
-      await new Promise((r) => setTimeout(r, 5000))
-      if (i % 2 === 0) walletApi('/api/refresh', {}).catch(() => {})
-      const p = await api(`${h.url}/api/payments/${encodeURIComponent(paymentId)}`)
-      if (p.status === 'paid') {
-        try { await walletApi(`/api/proof?hubUrl=${encodeURIComponent(h.url)}&paymentId=${encodeURIComponent(paymentId)}`) } catch {}
-        track(4, `${s.name} started`, 'ok', p.link || paid.link)
-        break
-      }
-      if (FINAL_BAD[p.status]) { track(2, FINAL_BAD[p.status] + ' Nothing was started.', 'bad', p.link || paid.link); break }
-    }
+    // 5. follow the hub's public payment record, also if the guest closes this screen
+    entry.link = paid.link
+    follow(entry, 2, 'Sent. The machine starts as soon as Bitcoin confirms it.', 'info')
   } catch (e) {
+    if (entry && e instanceof TypeError) { // the page lost the wallet mid-payment: it may have paid anyway, ask the hub
+      follow(entry, 1, 'Your wallet did not answer in time. Checking with the hub whether your payment arrived…', 'warn')
+      return
+    }
     const f = friendly(e.message)
-    track(0, f.text, 'bad')
-    if (f.prepare) $('#track-msg').append(el('button', { class: 'btn', type: 'button', on: { click: prepareWallet } }, 'Prepare my wallet'))
+    const here = !$('#device').hidden && openDev?.h.url === h.url && openDev?.s.id === s.id
+    if (here) {
+      track(0, f.text, 'bad')
+      if (f.prepare) $('#track-msg').append(el('button', { class: 'btn', type: 'button', on: { click: prepareWallet } }, 'Prepare my wallet'))
+    }
+    if (entry) { // keep the failure until the guest has seen it ("Payment problem · tap")
+      Object.assign(entry, { done: true, step: 1, msg: f.text + ' Nothing was paid.', cls: 'bad' })
+      if (here) pending = pending.filter((x) => x !== entry)
+      savePending()
+    }
   } finally {
     busy = false
     await walletApi('/api/me?fresh=1').catch(() => {}) // the wallet caches balances for 30 s: force a fresh one after paying
@@ -395,6 +426,38 @@ async function pay (h, s) {
     const fresh = hubs.find((x) => x.url === h.url)?.services.find((x) => x.id === s.id)
     if (fresh && !$('#device').hidden) { openDev = { h, s: fresh }; renderDevice(h, fresh) }
   }
+}
+
+// Follows one payment until the hub says paid (or a final failure). Updates the stored entry,
+// the machine list and, if this machine's screen is open, the steps on it.
+async function follow (entry, step, msg, cls) {
+  const update = (st, m, c, link) => {
+    Object.assign(entry, { step: st, msg: m, cls: c, link: link || entry.link })
+    savePending()
+    if (!$('#device').hidden && openDev?.h.url === entry.hubUrl && openDev?.s.id === entry.serviceId) {
+      track(st, m, c, entry.link)
+      if (entry.done) { pending = pending.filter((x) => x !== entry); savePending() } // seen on screen
+    } else render()
+  }
+  update(step, msg, cls)
+  const wallet = wallets.find((w) => w.url === entry.wallet)
+  const walletCall = (path, body) => wallet ? api(wallet.url + path, body) : Promise.reject(new Error('wallet removed'))
+  for (let i = 0; i < 120 && !entry.done; i++) { // ~10 min
+    await new Promise((r) => setTimeout(r, 5000))
+    let p
+    try { p = await api(`${entry.hubUrl}/api/payments/${encodeURIComponent(entry.paymentId)}`) } catch { continue } // hub busy or offline: try again
+    if (p.status === 'paid') {
+      try { await walletCall(`/api/proof?hubUrl=${encodeURIComponent(entry.hubUrl)}&paymentId=${encodeURIComponent(entry.paymentId)}`) } catch {}
+      entry.done = true
+      update(4, `${entry.name} started`, 'ok', p.link)
+    } else if (FINAL_BAD[p.status]) {
+      entry.done = true
+      update(2, FINAL_BAD[p.status] + ' Nothing was started.', 'bad', p.link)
+    }
+  }
+  if (!entry.done) { entry.done = true; update(2, 'Still not confirmed after 10 minutes. Check the transaction link, or ask the host.', 'warn') }
+  walletCall('/api/me?fresh=1').catch(() => {})
+  refresh()
 }
 
 // In-page confirmation (browser confirm() dialogs are not used): resolves true/false.
@@ -429,6 +492,7 @@ if (!wallets.length) {
   api('/api/me').then(() => { wallets = [{ url: location.origin, label: 'HubWallet' }]; save_('wallets', wallets); refresh() }).catch(() => {})
 }
 refresh()
+for (const p of pending.filter((x) => !x.done)) follow(p, p.step ?? 2, p.msg, p.cls) // resume after a reload
 setInterval(() => { if (!busy && $('#device').hidden) refresh() }, 20000)
 setInterval(() => { // countdowns tick locally between refreshes
   if ($('#device').hidden) { if (hubs.some((h) => h.services.some((s) => statusOf(s).until > Date.now()))) render() }

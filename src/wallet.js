@@ -55,6 +55,23 @@ export function transferAmount (t) {
 export const isWitnessInvoice = (invoice) => String(invoice || '').includes('wvout')
 const WITNESS_SATS = 1000
 
+// rgb-sdk passes skipSync = false to getBtcBalance and listUnspents, so every balance read
+// re-synced the wallet with the indexer: ~50 HTTPS requests, 10–25 s, and rgb-lib is
+// synchronous, so the whole server froze meanwhile (measured: docs/PERF.md).
+// We read rgb-lib's local database instead (1 ms, same numbers after a sync) and sync
+// only when the numbers can change: see sync() and its callers in hub-core.js / guest.js.
+// `manager` is the rgb-sdk WalletManager (WDK: account.getRgbWallet()).
+function readLocal (manager) {
+  const c = manager.client
+  const online = c.getOnline() // goOnline once per process (~7 s), then cached by rgb-sdk
+  return {
+    address: c.getAddress(),
+    btc: c.wallet.getBtcBalance(online, true),
+    unspents: () => c.wallet.listUnspents(online, false, true)
+  }
+}
+const syncNow = (manager) => { try { manager.syncWallet() } catch (e) { return String(e.message || e) } }
+
 export class Wallet {
   constructor (name, root = process.env.DATA_DIR || 'data') {
     this.name = name
@@ -83,12 +100,16 @@ export class Wallet {
 
   address () { return this.run((a) => a.getAddress()) }
 
+  // Local read, no indexer sync (see readLocal).
   balance () {
     return this.run(async (a) => {
-      const r = await a.registerWallet()
-      return plain({ address: r.address, btc: r.btcBalance, assets: await a.listAssets() })
+      const r = readLocal(a.getRgbWallet())
+      return plain({ address: r.address, btc: r.btc, assets: await a.listAssets() })
     })
   }
+
+  // Indexer sync (10–25 s, blocking): only when bitcoin may have moved. Returns an error string or undefined.
+  sync () { return this.run((a) => syncNow(a.getRgbWallet())) }
 
   createUtxos (num = 5) { return this.run(async (a) => plain(await a.createUtxos({ upTo: true, num, feeRate: 2 }))) }
 
@@ -122,7 +143,16 @@ export class Wallet {
   // Downloads incoming consignments, sends ACKs, updates confirmations.
   refresh () { return this.run(async (a) => { try { await a.refreshWallet() } catch (e) { return String(e.message || e) } }) }
 
-  transfers (assetId) { return this.run(async (a) => plain(await a.listTransfers(assetId))) }
+  // Without assetId rgb-lib lists only transfers with no asset (none): ask asset by asset.
+  transfers (assetId) {
+    return this.run(async (a) => {
+      if (assetId) return plain(await a.listTransfers(assetId))
+      const ids = Object.values(plain(await a.listAssets()) || {}).flat().map((x) => x.assetId).filter(Boolean)
+      const all = []
+      for (const id of ids) all.push(...plain(await a.listTransfers(id)).map((t) => ({ assetId: id, ...t })))
+      return all.sort((x, y) => (x.createdAt || 0) - (y.createdAt || 0))
+    })
+  }
 
   // Reads an RGB invoice WITHOUT paying it: { recipientId, assetId?, assignment, network,
   // expirationTimestamp, transportEndpoints }. The payer uses it to check that the invoice
@@ -184,16 +214,20 @@ export class WatchWallet {
 
   address () { return this.run((w) => w.getAddress()) }
 
+  // Local reads, no indexer sync (see readLocal).
   balance () {
     return this.run((w) => {
-      const r = w.registerWallet()
-      return plain({ address: r.address, btc: r.btcBalance, assets: w.listAssets() })
+      const r = readLocal(w)
+      return plain({ address: r.address, btc: r.btc, assets: w.listAssets() })
     })
   }
 
   // UTXOs; "free colorable" = can hold a new RGB allocation (needed to issue assets
   // and as change when sending). Creating them needs a signature: see prepareUtxos.
-  unspents () { return this.run((w) => plain(w.listUnspents())) }
+  unspents () { return this.run((w) => plain(readLocal(w).unspents())) }
+
+  // Indexer sync (10–25 s, blocking): only when bitcoin may have moved. Returns an error string or undefined.
+  sync () { return this.run((w) => syncNow(w)) }
 
   // ---------- receiving: no signature needed ----------
 
@@ -226,7 +260,18 @@ export class WatchWallet {
   // validation: rgb-lib checks the asset history back to genesis), sends ACKs,
   // updates confirmations. Returns an error string instead of throwing: a failed refresh
   // (proxy or indexer down) must not stop the payment watcher.
-  refresh () { return this.run((w) => { try { w.refreshWallet() } catch (e) { return String(e.message || e) } }) }
+  // fast = true: no indexer sync inside rgb-lib (skip_sync). Settling an incoming witness payment
+  // then costs ~2 s instead of ~30 s (rgb-lib syncs twice while settling, measured in docs/PERF.md);
+  // the txo it needs is already in the database since the consignment was accepted. The caller
+  // syncs once afterwards (Hub.syncWallet). Spends keep the full refresh (bdk must see spent outputs).
+  refresh ({ fast = false } = {}) {
+    return this.run((w) => {
+      try {
+        if (fast) w.client.wallet.refresh(w.client.getOnline(), null, [], true)
+        else w.refreshWallet()
+      } catch (e) { return String(e.message || e) }
+    })
+  }
 
   transfers (assetId) { return this.run((w) => plain(w.listTransfers(assetId))) }
 
