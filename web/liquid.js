@@ -23,8 +23,11 @@ export function liquid () {
   svg.innerHTML = '<filter id="goo"><feGaussianBlur in="SourceGraphic" stdDeviation="1.4" result="b"/><feColorMatrix in="b" mode="matrix" values="1 0 0 0 0  0 1 0 0 0  0 0 1 0 0  0 0 0 16 -6"/></filter>'
   document.body.append(svg)
 
-  // refraction on every full-tier glass surface (cards, panels, bars, round controls); chips stay CSS-only
-  const GLASS = '.topbar, .tabbar, .pass, .group, .overview, .device-card, .confirm, .proposal, .screen-pay, .composer, .icon-btn, .sheet-panel'
+  // refraction only on the two floating bars. An SVG backdrop-filter is repainted on every scroll frame for
+  // every element that has it: on all glass surfaces the pages dropped to 22–35 fps (host desktop 22, guest
+  // phone 31; 60 with bars only, measured with Playwright on the demo PC). Cards, groups and sheets keep the
+  // CSS glass of liquid-glass.css (blur + saturate), which costs almost nothing.
+  const GLASS = '.topbar, .tabbar'
   const scan = (root) => { if (root.matches?.(GLASS)) refract(root); root.querySelectorAll?.(GLASS).forEach((n) => refract(n)) }
   scan(document.body)
   new MutationObserver((list) => list.forEach((m) => m.addedNodes.forEach((n) => n.nodeType === 1 && scan(n)))).observe(document.body, { childList: true, subtree: true })
