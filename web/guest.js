@@ -3,7 +3,8 @@
 //   /api/transfers, /api/proof), kept on this device. Swiping the wallet pass changes the active wallet; payments use it.
 // - Hubs: public API (/api/services, /api/services/:id/order, /api/payments/:id). A hub is added only after the guest
 //   confirms it (search field or QR link), and can be used from a distance.
-// - If no hub answers, example devices are shown, marked "Example data".
+// - Example devices only with the example wallet ("Try with an example wallet"), marked "Example data".
+//   Otherwise no hub = an empty list that says so, and a hub that does not answer is named.
 import { el, fill, money, DOLLAR, icon, porthole, statusOf, clock, themeButton, lens } from './ui.js'
 import { liquid, morphTopbar, droplet, tabbar, morphOpen, morphClose } from './liquid.js'
 
@@ -49,6 +50,7 @@ let hubUrls = load_('hubUrls', [])
 let offered = (new URLSearchParams(location.search).get('hubs') || '').split(',').map(normUrl).filter((u) => u && !hubUrls.includes(u))
 const walletData = {} // url → { me, transfers, ok }
 let hubs = []; let demoHubs = false; let busy = false; let query = ''
+let silentHubs = [] // connected hubs that did not answer the last refresh
 // Payments sent and still followed (or just finished, until the guest has seen the result):
 // [{ hubUrl, serviceId, name, paymentId, amount, link, at, step, msg, cls, done }]
 let pending = load_('pending', []).filter((p) => Date.now() - p.at < 30 * 60_000)
@@ -72,7 +74,8 @@ async function loadWallet (w) {
 async function loadHubs () {
   const found = []
   for (const url of hubUrls) { try { const h = await api(url + '/api/services'); found.push({ url, name: h.name, services: h.services || [] }) } catch {} }
-  demoHubs = found.length === 0
+  silentHubs = hubUrls.filter((u) => !found.some((h) => h.url === u))
+  demoHubs = found.length === 0 && current()?.url === EXAMPLE_WALLET // fake machines only for the fake wallet
   hubs = demoHubs ? EXAMPLE.hubs : found
 }
 async function refresh () {
@@ -151,9 +154,12 @@ function render () {
         porthole(s, { size: 48 }),
         el('div', { class: 'grow stack', style: 'gap:4px' }, el('div', { class: 'title' }, s.name), el('div', { class: 'sub' }, many ? `${priceText(s)} · ${h.name}` : priceText(s)), el('div', {}, badge(s, h))),
         el('span', { class: 'chev' }, icon('chevronRight', { size: 18 })))))
-    : el('div', { class: 'group' }, el('div', { class: 'empty' }, icon('search', { size: 32 }),
-        el('h3', {}, q ? 'No machine matches' : 'No hub connected'),
-        el('p', { class: 'footnote' }, q ? 'Try another name.' : 'Scan the code on a machine, or connect a hub below.'))))
+    : el('div', { class: 'group' }, el('div', { class: 'empty' }, icon(silentHubs.length && !q ? 'alert' : 'search', { size: 32 }),
+        el('h3', {}, q ? 'No machine matches' : silentHubs.length ? 'The hub does not answer' : 'No hub connected'),
+        el('p', { class: 'footnote' }, q ? 'Try another name.'
+          : silentHubs.length ? `No answer from ${silentHubs.join(', ')}. It may be off, or busy for a few seconds. Try again.`
+            : 'Scan the code on a machine, or connect a hub below.'),
+        silentHubs.length && !q ? el('button', { class: 'btn small', type: 'button', on: { click: refresh } }, 'Try again') : null)))
 
   // wallet sheet (active wallet)
   const d = data()
