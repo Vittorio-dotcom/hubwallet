@@ -1,3 +1,5 @@
+<img src="web/img/logo.svg" width="64" height="64" alt="HubWallet logo">
+
 # HubWallet
 
 > Whoever offers a physical service (a laundromat, a coworking space, a short-term rental) puts a small box in the

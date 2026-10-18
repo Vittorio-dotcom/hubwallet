@@ -66,13 +66,16 @@ const P = {
   auto: '<circle cx="12" cy="12" r="9"/><path d="M12 3a9 9 0 0 1 0 18Z" fill="currentColor" stroke="none"/>'
 }
 const SVG = 'http://www.w3.org/2000/svg'
+// Icons that read better solid than as a wireframe (the brand mark, mainly).
+const FILLED = { hub: '<path d="M21 8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16Z"/>' }
 export function icon (name, { size = 22, label } = {}) {
   const s = document.createElementNS(SVG, 'svg')
   s.setAttribute('viewBox', '0 0 24 24'); s.setAttribute('width', size); s.setAttribute('height', size)
-  s.setAttribute('fill', 'none'); s.setAttribute('stroke', 'currentColor'); s.setAttribute('stroke-width', '1.75')
+  const filled = FILLED[name]
+  s.setAttribute('fill', filled ? 'currentColor' : 'none'); s.setAttribute('stroke', filled ? 'none' : 'currentColor'); s.setAttribute('stroke-width', '1.75')
   s.setAttribute('stroke-linecap', 'round'); s.setAttribute('stroke-linejoin', 'round'); s.setAttribute('class', 'ico')
   if (label) { s.setAttribute('role', 'img'); s.setAttribute('aria-label', label) } else s.setAttribute('aria-hidden', 'true')
-  s.innerHTML = P[name] || P.device // static paths from this file only, never user data
+  s.innerHTML = filled || P[name] || P.device // static paths from this file only, never user data
   return s
 }
 
