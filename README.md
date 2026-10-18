@@ -1,6 +1,4 @@
-<img src="web/img/logo.svg" width="64" height="64" alt="HubWallet logo">
-
-# HubWallet
+# HubWallet <img src="web/img/logo.svg" width="48" height="48" align="right" alt="HubWallet logo">
 
 > Whoever offers a physical service (a laundromat, a coworking space, a short-term rental) puts a small box in the
 > shop: the **hub**. A customer scans a QR, picks a service and pays in **dollars on Bitcoin with RGB** from their own
