@@ -46,10 +46,17 @@ async function refreshNow () {
   refreshing = true
   try { await wallet.refresh() } finally { refreshing = false; balanceCache = null }
 }
+// At most one sync at a time and one per minute: pages may ask /api/refresh every few seconds,
+// and each sync freezes this server for 10–50 s (more when the indexer is slow).
+let syncing = false
+let lastSync = 0
 async function syncNow () {
-  const err = await wallet.sync()
-  if (err) console.error('sync:', err)
-  balanceCache = null
+  if (syncing || Date.now() - lastSync < 60_000) return
+  syncing = true
+  try {
+    const err = await wallet.sync()
+    if (err) console.error('sync:', err)
+  } finally { syncing = false; lastSync = Date.now(); balanceCache = null }
 }
 function burst (reason) {
   for (const d of [10_000, 35_000, 70_000, 120_000]) setTimeout(() => refreshNow(), d)

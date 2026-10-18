@@ -104,10 +104,14 @@ export class Hub extends EventEmitter {
   stop () { clearInterval(this.timer); clearTimeout(this.burstTimer); clearTimeout(this.syncTimer); this.burstTimer = null; this.followUntil = 0 }
 
   // Indexer sync: bitcoin balance and UTXOs. Blocking (10–25 s), so only at quiet moments.
+  // At most one at a time and one per minute (manual refreshes may come in a row).
   async syncWallet () {
-    const err = await this.wallet.sync()
-    if (err) console.error('sync:', err)
-    this.walletCache = null
+    if (this.syncing || Date.now() - (this.lastSync || 0) < 60_000) return
+    this.syncing = true
+    try {
+      const err = await this.wallet.sync()
+      if (err) console.error('sync:', err)
+    } finally { this.syncing = false; this.lastSync = Date.now(); this.walletCache = null }
   }
 
   // Is there anything the watcher must look at?
