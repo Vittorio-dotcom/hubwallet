@@ -107,6 +107,24 @@ function parseItem (t) {
   if (m[4] != null) { o.from = Number(m[4]); o.to = Number(m[5]) }
   return o.name ? o : null
 }
+// "1 for still water, 2 for sparkling" · "still 1, sparkling 3" · "water dispenser, 1 still, 3 sparkling":
+// a free list of at least two priced items (number before or after the name). Not for rules ("lock after 22").
+const ITEM_REV = /^(\d+(?:[.,]\d{1,2})?)\s*(?:€|eur|euro|\$|dollars?|husd)?\s+(?:(?:for|per|the|a|al|il|la|lo|le)\s+)?(.+)$/i
+const RULEISH = /(rul|regol|lock|blocc|unlock|sblocc|after|dopo|before|prima|mainten|manutenz|%|weekend|notify|avvisa|ogni|every|uses|usi)/i
+export function listedOptions (text) {
+  const t = String(text || '').trim().replace(/[.!]+$/, '')
+  if (RULEISH.test(t)) return null
+  const parts = t.split(/[;\n]+|,(?!\d)|\s+(?:and|e|ed|or|oppure)\s+/i).map((x) => x.trim()).filter(Boolean)
+  const items = []
+  for (const [i, part] of parts.entries()) {
+    if (!/\d/.test(part)) { if (i === 0) continue; return null } // "water dispenser, …": the machine's name first
+    const rev = part.match(ITEM_REV)
+    const it = rev ? { name: rev[2].trim(), price: Math.round(Number(rev[1].replace(',', '.')) * 100) } : parseItem(part)
+    if (!it || !it.name || /\d/.test(it.name.replace(/\d+\s*°|°/g, ''))) return null
+    items.push(it)
+  }
+  return items.length >= 2 ? items : null
+}
 const nameKey = (n) => String(n).toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[^a-z0-9]+/g, '')
 export function optionChange (text, current = [], base = null) {
   const t = String(text || '').trim().replace(/[.!]+$/, '')
@@ -124,7 +142,8 @@ export function optionChange (text, current = [], base = null) {
     if (!items.length || !items.every(Boolean)) return null
     // the first option added to a machine with a price keeps that price as "standard" (water 1.00 + sparkling 2.00)
     const was = (current || []).length ? current : base?.price > 0 && !items.some((n) => n.price === base.price) ? [{ name: 'standard', price: base.price }] : []
-    const keep = was.filter((o) => !items.some((n) => nameKey(n.name) === nameKey(o.name)))
+    // "standard" (the old base price) gives way to a named item with the same price ("add still 1")
+    const keep = was.filter((o) => !items.some((n) => nameKey(n.name) === nameKey(o.name) || (nameKey(o.name) === 'standard' && n.price === o.price)))
     return [...keep, ...items]
   }
   const del = t.match(/^(?:remove|delete|togli|rimuovi|elimina)\s+(?:(?:the|il|la|lo)\s+|l'\s*)?(?:option|opzione|servizio|service)?\s*:?\s*(.+)$/i)
@@ -324,7 +343,8 @@ export class DeviceLayer {
       if (no) return { reply: no }
       if (req.body?.base && req.body?.text) {
         const base = validateDevice(req.body.base)
-        const opts = optionChange(req.body.text, base.options, base) ?? optionChange(String(req.body.text).split('. ').pop(), base.options, base)
+        const last = String(req.body.text).split('. ').pop()
+        const opts = optionChange(req.body.text, base.options, base) ?? optionChange(last, base.options, base) ?? listedOptions(last)
         if (opts) return { reply: 'Options set. Check them and add the machine, or tell me what else to change.', proposed: validateDevice({ ...base, options: opts }, { current: base }) }
         const out = await editDevice(String(req.body.text), base)
         if (out.reply) return { reply: out.reply }
@@ -339,7 +359,9 @@ export class DeviceLayer {
         // "a coffee machine with espresso 1.20 and cappuccino 2": the chat prompt knows no options, the edit one does
         // one message at a time, newest first: the model reads "1 for still, 2 for sparkling" well, a whole chat badly
         const priced = (req.body?.messages || []).filter((x) => x?.role === 'host' && ((x.text || '').match(/\d+(?:[.,]\d+)?/g) || []).length >= 2).reverse().slice(0, 3)
-        for (const m of opts?.length ? [] : priced) {
+        for (const m of opts?.length ? [] : priced) { // code first, the model only if the code finds no list
+          const listed = listedOptions(m.text)
+          if (listed) { out.proposed = validateDevice({ ...out.proposed, options: listed }); break }
           try {
             const e = await editDevice(m.text, out.proposed)
             if (e.proposed?.options?.length >= 2) { out.proposed = validateDevice({ ...out.proposed, options: e.proposed.options }); break }
@@ -360,7 +382,7 @@ export class DeviceLayer {
       const latest = String(req.body?.text || '').split('. ').pop() // the latest request
       const no = guard(latest)
       if (no) return { reply: no }
-      const opts = optionChange(latest, base.options, base)
+      const opts = optionChange(latest, base.options, base) ?? listedOptions(latest)
       const r = opts ? { proposed: { ...base, options: opts } } : await editDevice(text, base)
       if (r.reply) return { reply: r.reply }
       const proposed = validateDevice(r.proposed, { current })
