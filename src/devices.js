@@ -232,7 +232,17 @@ export class DeviceLayer {
       this.saveState()
       return { hour: this.hour(), simulated: this.state.clockHour !== null }
     }))
-    r.post('/devices/chat', owner, wrap((req) => chatDevice(req.body?.messages, { existingIds: this.list().map((d) => d.id) })))
+    // { base, text }: a proposal is already on screen and the host asks to change it ("make it 2 dollars"):
+    // edit that proposal instead of starting the conversation again.
+    r.post('/devices/chat', owner, wrap(async (req) => {
+      if (req.body?.base && req.body?.text) {
+        const base = validateDevice(req.body.base)
+        const out = await editDevice(String(req.body.text), base)
+        if (out.reply) return { reply: out.reply }
+        return { reply: 'Updated. Check it and apply it, or tell me what else to change.', proposed: validateDevice(out.proposed, { current: base }) }
+      }
+      return chatDevice(req.body?.messages, { existingIds: this.list().map((d) => d.id) })
+    }))
     r.post('/devices', owner, wrap((req) => this.add(req.body?.config)))
     // { text } = what the host wrote since the last applied change (the page joins the answers to the AI's questions);
     // { messages } alone works too. → { proposed, diff } or { reply } when the AI needs something ("How much?").
@@ -240,7 +250,9 @@ export class DeviceLayer {
       const current = this.get(req.params.id)
       const msgs = Array.isArray(req.body?.messages) ? req.body.messages : []
       const text = req.body?.text || msgs.filter((m) => m?.role === 'host').map((m) => m.text).join('. ')
-      const r = await editDevice(text, current)
+      // { base }: the proposal on screen, so changes add up ("price 3", then "and lock it after 22")
+      const base = req.body?.base ? validateDevice({ ...req.body.base, version: current.version }, { current }) : current
+      const r = await editDevice(text, base)
       if (r.reply) return { reply: r.reply }
       const proposed = validateDevice(r.proposed, { current })
       return { proposed, diff: diffDevices(current, proposed) }
