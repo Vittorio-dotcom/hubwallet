@@ -366,6 +366,7 @@ async function prepareWallet () {
 }
 async function pay (h, s) {
   busy = true; renderDevice(h, s)
+  let entry = null // stored as soon as the wallet starts paying, so closing the screen loses nothing
   try {
     if (demoHubs || current().url === EXAMPLE_WALLET) { // example mode: show the steps, move nothing
       for (let i = 0; i <= 3; i++) { track(i, 'Example data: nothing is really paid.'); await new Promise((r) => setTimeout(r, 900)) }
@@ -382,16 +383,30 @@ async function pay (h, s) {
     const ok = await confirmPay(c, h)
     if (!ok) { track(0, 'Payment cancelled. Nothing was paid.'); return }
     track(1, `Paying ${money(c.amount)} ${DOLLAR}…`)
-    // 4. pay exactly what was confirmed
+    entry = { hubUrl: h.url, serviceId: s.id, name: s.name, paymentId, amount: c.amount, wallet: current().url, at: Date.now(), step: 1, msg: `Your wallet is paying ${money(c.amount)} ${DOLLAR}…`, cls: 'info' }
+    pending = pending.filter((x) => !(x.hubUrl === h.url && x.serviceId === s.id)).concat(entry)
+    savePending()
+    // 4. pay exactly what was confirmed (can take a minute when the wallet has to sync first)
     const paid = await walletApi('/api/pay-request', { hubUrl: h.url, paymentId, expect: { assetId: c.assetId, amount: c.amount } })
     // 5. follow the hub's public payment record, also if the guest closes this screen
-    const entry = { hubUrl: h.url, serviceId: s.id, name: s.name, paymentId, amount: c.amount, link: paid.link, wallet: current().url, at: Date.now() }
-    pending = pending.filter((x) => !(x.hubUrl === h.url && x.serviceId === s.id)).concat(entry)
+    entry.link = paid.link
     follow(entry, 2, 'Sent. The machine starts as soon as Bitcoin confirms it.', 'info')
   } catch (e) {
+    if (entry && e instanceof TypeError) { // the page lost the wallet mid-payment: it may have paid anyway, ask the hub
+      follow(entry, 1, 'Your wallet did not answer in time. Checking with the hub whether your payment arrived…', 'warn')
+      return
+    }
     const f = friendly(e.message)
-    track(0, f.text, 'bad')
-    if (f.prepare) $('#track-msg').append(el('button', { class: 'btn', type: 'button', on: { click: prepareWallet } }, 'Prepare my wallet'))
+    const here = !$('#device').hidden && openDev?.h.url === h.url && openDev?.s.id === s.id
+    if (here) {
+      track(0, f.text, 'bad')
+      if (f.prepare) $('#track-msg').append(el('button', { class: 'btn', type: 'button', on: { click: prepareWallet } }, 'Prepare my wallet'))
+    }
+    if (entry) { // keep the failure until the guest has seen it ("Payment problem · tap")
+      Object.assign(entry, { done: true, step: 1, msg: f.text + ' Nothing was paid.', cls: 'bad' })
+      if (here) pending = pending.filter((x) => x !== entry)
+      savePending()
+    }
   } finally {
     busy = false
     await walletApi('/api/me?fresh=1').catch(() => {}) // the wallet caches balances for 30 s: force a fresh one after paying
